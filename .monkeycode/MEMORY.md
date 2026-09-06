@@ -42,11 +42,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - Gradio 6.0+ 的 theme 参数需传入 launch()，不能放在 Blocks 构造函数中
 
 [Project Knowledge Summary]
-- Date: 2025-09-04
-- Context: 完成自主运行系统搭建并推送到 GitHub
-- Category: Operations & Deployment
+- Date: 2026-09-06
+- Context: 优化 digital-creator 系统，修复人格持久化和决策引擎集成
+- Category: Troubleshooting & Debugging
 - Instructions:
-  - GitHub 用户: wbdyouxiang2023-gif
-  - 仓库: https://github.com/wbdyouxiang2023-gif/agent-autonomous
-  - 本地预览: https://7860-b0ecdb9061e08fd2.monkeycode-ai.online
-  - GitHub secret scanning 会阻止含 token 的提交，必须使用 gitignore 排除
+  - Personality 状态必须序列化完整字段（traits/mood/actions/memory），不能只保存 memory
+  - Decision engine 必须传入 personality.ToTraitsMap()，不能硬编码默认特质
+  - Dashboard 应加载 ~/.persona.json 中的实际人格，而非每次创建新实例
+  - go.mod module name 使用 "todos" 但主包是 src/main.go，cli/todos.go 用 package cli 避免 main 重声明
+  - Gradio 6.0+ theme 参数放在 launch() 而非 Blocks() 构造函数中
+
