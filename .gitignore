@@ -1,0 +1,15 @@
+# Build artifacts
+digital-creator
+todos
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Data files
+~/.todos.json
+~/.agent_memory.json
+~/.decision_log.json
+~/.creator_store.json
