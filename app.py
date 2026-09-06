@@ -65,7 +65,7 @@ def build_table(todos):
         rows.append(f"| {t['id']} | {t['text']} | {status} | [Toggle] |")
     return "\n".join(rows)
 
-with gr.Blocks(title="Agent Workspace", theme=gr.themes.Soft(primary_hue="cyan")) as demo:
+with gr.Blocks(title="Agent Workspace") as demo:
     gr.Markdown("# 🤖 Agent Autonomous Workspace\n### Self-Driving AI Development System")
     with gr.Row():
         with gr.Column(scale=2):
@@ -80,4 +80,4 @@ with gr.Blocks(title="Agent Workspace", theme=gr.themes.Soft(primary_hue="cyan")
         with gr.Column(scale=1):
             gr.Markdown("## 📊 System Status")
             sys_json = gr.JSON(value=get_system_stats())
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, theme=gr.themes.Soft(primary_hue="cyan"))
