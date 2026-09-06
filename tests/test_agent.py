@@ -2,7 +2,7 @@
 import json, os, tempfile
 
 def test_persistence():
-    tmp = tempfile.NamedTemporaryFile(suffix='.json', delete=False)
+    tmp = tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='w')
     json.dump({"todos": [{"id": 1, "text": "test", "done": False}], "next_id": 2}, tmp)
     tmp.close()
     with open(tmp.name) as f:
