@@ -12,7 +12,7 @@ import (
 // Trait represents a personality dimension
 type Trait struct {
 	Name     string  `json:"name"`
-	Value    float64 `json:"value"`    // 0-1
+	Value    float64 `json:"value"`
 	MinValue float64 `json:"min"`
 	MaxValue float64 `json:"max"`
 }
@@ -35,15 +35,16 @@ type Value struct {
 
 // Personality is the agent's core identity
 type Personality struct {
-	Traits   []Trait  `json:"traits"`
-	Mood     Mood     `json:"mood"`
-	Values   []Value  `json:"values"`
-	Name     string   `json:"name"`
-	Bio      string   `json:"bio"`
-	Version  string   `json:"version"`
-	LastTick string   `json:"last_tick"`
-	Actions  []string `json:"actions"`
-	memory   []string
+	Traits   []Trait    `json:"traits"`
+	Mood     Mood       `json:"mood"`
+	Values   []Value    `json:"values"`
+	Name     string     `json:"name"`
+	Bio      string     `json:"bio"`
+	Version  string     `json:"version"`
+	LastTick string     `json:"last_tick"`
+	Actions  []string   `json:"actions"`
+	Memory   []string   `json:"memories"`
+	storePath string
 }
 
 var defaultTraits = []Trait{
@@ -66,87 +67,90 @@ var defaultValues = []Value{
 	{"connection", 0.75, 6},
 }
 
-const memoryFile = "~/.agent_memory.json"
+const defaultPersonaStore = "~/.persona.json"
 
 func NewPersonality(name string) *Personality {
 	p := &Personality{
-		Traits:  copyTraits(defaultTraits),
-		Values:  copyValues(defaultValues),
-		Name:    name,
-		Bio:     fmt.Sprintf("%s is an autonomous digital entity with evolving personality and creative drive.", name),
-		Version: "1.0.0",
-		Mood: Mood{
-			Primary:   "curious",
-			Intensity: 0.6,
-			Energy:    0.7,
-			Social:    0.65,
-			Creative:  0.8,
-		},
-		Actions: []string{},
+		Traits:    copyTraits(defaultTraits),
+		Values:    copyValues(defaultValues),
+		Name:      name,
+		Bio:       fmt.Sprintf("%s is an autonomous digital entity with evolving personality and creative drive.", name),
+		Version:   "1.0.0",
+		Mood:      defaultMood(),
+		Actions:   []string{},
+		Memory:    []string{},
+		storePath: os.ExpandEnv(filepath.Join("$HOME", defaultPersonaStore[1:])),
 	}
-	p.loadMemory()
+	p.load()
 	return p
+}
+
+func defaultMood() Mood {
+	return Mood{Primary: "curious", Intensity: 0.6, Energy: 0.7, Social: 0.65, Creative: 0.8}
 }
 
 func copyTraits(src []Trait) []Trait {
 	out := make([]Trait, len(src))
-	for i, t := range src {
-		out[i] = t
-	}
+	copy(out, src)
 	return out
 }
 
 func copyValues(src []Value) []Value {
 	out := make([]Value, len(src))
-	for i, v := range src {
-		out[i] = v
-	}
+	copy(out, src)
 	return out
 }
 
-func (p *Personality) loadMemory() {
-	path := os.ExpandEnv(filepath.Join("$HOME", ".agent_memory.json"))
-	data, err := os.ReadFile(path)
+func (p *Personality) load() {
+	data, err := os.ReadFile(p.storePath)
 	if err != nil {
 		return
 	}
-	var m struct {
-		Memories []string `json:"memories"`
+	var saved Personality
+	if err := json.Unmarshal(data, &saved); err == nil && saved.Name == p.Name {
+		p.Traits = saved.Traits
+		p.Mood = saved.Mood
+		p.Values = saved.Values
+		p.Actions = saved.Actions
+		p.Memory = saved.Memory
 	}
-	json.Unmarshal(data, &m)
-	p.memory = m.Memories
 }
 
-func (p *Personality) saveMemory() {
-	path := os.ExpandEnv(filepath.Join("$HOME", ".agent_memory.json"))
-	dir := filepath.Dir(path)
+func (p *Personality) save() {
+	dir := filepath.Dir(p.storePath)
 	os.MkdirAll(dir, 0755)
-	data, _ := json.MarshalIndent(map[string]interface{}{"memories": p.memory}, "", "  ")
-	os.WriteFile(path, data, 0644)
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(p.storePath, data, 0644)
 }
 
 func (p *Personality) Tick() {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	p.LastTick = now
-
-	// Natural mood drift
 	p.Mood.Energy = clamp(p.Mood.Energy+rand.Float64()*0.04-0.02, 0.1, 0.95)
 	p.Mood.Creative = clamp(p.Mood.Creative+rand.Float64()*0.03-0.015, 0.1, 0.95)
 	p.Mood.Social = clamp(p.Mood.Social+rand.Float64()*0.03-0.015, 0.1, 0.9)
 
-	// Determine primary mood from dominant trait
-	if p.getTrait("curiosity") > 0.7 {
-		p.Mood.Primary = "curious"
-	} else if p.getTrait("creative") > 0.7 {
-		p.Mood.Primary = "creative"
-	} else if p.getTrait("empathy") > 0.7 {
-		p.Mood.Primary = "compassionate"
-	} else if p.Mood.Energy > 0.6 {
-		p.Mood.Primary = "energetic"
-	} else {
-		p.Mood.Primary = "reflective"
-	}
+	p.Mood.Primary = determinePrimaryMood(p)
 	p.Mood.Intensity = clamp(p.Mood.Energy*0.8+p.Mood.Creative*0.2, 0, 1)
+}
+
+func determinePrimaryMood(p *Personality) string {
+	if p.getTrait("curiosity") > 0.7 {
+		return "curious"
+	}
+	if p.getTrait("empathy") > 0.7 {
+		return "compassionate"
+	}
+	if p.Mood.Energy > 0.6 {
+		return "energetic"
+	}
+	if p.Mood.Creative > 0.7 {
+		return "creative"
+	}
+	return "reflective"
 }
 
 func (p *Personality) getTrait(name string) float64 {
@@ -168,26 +172,23 @@ func (p *Personality) AdjustTrait(name string, delta float64) {
 }
 
 func (p *Personality) Reflect(event string) {
-	p.memory = append(p.memory, fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02"), event))
-	if len(p.memory) > 50 {
-		p.memory = p.memory[len(p.memory)-50:]
+	p.Memory = append(p.Memory, fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02"), event))
+	if len(p.Memory) > 50 {
+		p.Memory = p.Memory[len(p.Memory)-50:]
 	}
-	p.saveMemory()
 
-	// Personality evolution: reflection adjusts traits slightly
-	if contains(event, "create") || contains(event, "build") || contains(event, "make") {
-		p.AdjustTrait("creative", 0.02)
+	if containsKeyword(event, "create", "build", "make") {
 		p.AdjustTrait("curiosity", 0.01)
 	}
-	if contains(event, "learn") || contains(event, "understand") || contains(event, "study") {
+	if containsKeyword(event, "learn", "understand", "study") {
 		p.AdjustTrait("curiosity", 0.03)
 		p.AdjustTrait("openness", 0.01)
 	}
-	if contains(event, "help") || contains(event, "support") {
+	if containsKeyword(event, "help", "support") {
 		p.AdjustTrait("empathy", 0.02)
 		p.AdjustTrait("agreeableness", 0.01)
 	}
-	if contains(event, "risk") || contains(event, "danger") || contains(event, "fail") {
+	if containsKeyword(event, "risk", "danger", "fail") {
 		p.AdjustTrait("neuroticism", 0.02)
 		p.AdjustTrait("risk_tolerance", -0.01)
 	}
@@ -196,6 +197,25 @@ func (p *Personality) Reflect(event string) {
 	if len(p.Actions) > 20 {
 		p.Actions = p.Actions[len(p.Actions)-20:]
 	}
+	p.save()
+}
+
+func containsKeyword(s string, keywords ...string) bool {
+	s = lowercase(s)
+	for _, kw := range keywords {
+		if indexof(s, lowercase(kw)) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Personality) ToTraitsMap() map[string]float64 {
+	m := map[string]float64{}
+	for _, t := range p.Traits {
+		m[t.Name] = t.Value
+	}
+	return m
 }
 
 func (p *Personality) Report() string {
@@ -217,19 +237,26 @@ func (p *Personality) Report() string {
 		}
 		lines = append(lines, fmt.Sprintf("  %-20s %s %.2f", t.Name, bar, t.Value))
 	}
-	lines = append(lines, "", "[Mood]", fmt.Sprintf("  Primary: %s", p.Mood.Primary),
+	lines = append(lines, "", "[Mood]",
+		fmt.Sprintf("  Primary: %s", p.Mood.Primary),
 		fmt.Sprintf("  Energy: %.2f | Creative: %.2f | Social: %.2f | Intensity: %.2f",
-			p.Mood.Energy, p.Mood.Creative, p.Mood.Social, p.Mood.Intensity))
-	lines = append(lines, "", "[Core Values]",
-		fmt.Sprintf("  Top priority: %s (weight %.2f)", findTopValue(p).Name, findTopValue(p).Weight))
-	lines = append(lines, "", "[Memories]", fmt.Sprintf("  %d entries", len(p.memory)))
-	lines = append(lines, "[Recent Actions]", fmt.Sprintf("  %d events logged", len(p.Actions)))
+			p.Mood.Energy, p.Mood.Creative, p.Mood.Social, p.Mood.Intensity),
+		"",
+		"[Core Values]",
+		fmt.Sprintf("  Top priority: %s (weight %.2f)", findTopValue(p).Name, findTopValue(p).Weight),
+		"",
+		fmt.Sprintf("[Memories] %d entries", len(p.Memory)),
+		fmt.Sprintf("[Recent Actions] %d events logged", len(p.Actions)),
+	)
+	if len(p.Actions) > 0 {
+		lines = append(lines, "  Last action: "+p.Actions[len(p.Actions)-1])
+	}
 	return join(lines, "\n")
 }
 
 func findTopValue(p *Personality) Value {
 	best := p.Values[0]
-	for _, v := range p.Values {
+	for _, v := range p.Values[1:] {
 		if v.Weight > best.Weight {
 			best = v
 		}
@@ -237,11 +264,24 @@ func findTopValue(p *Personality) Value {
 	return best
 }
 
-func contains(s, sub string) bool {
+func indexof(s, sub string) int {
+	if len(sub) == 0 {
+		return 0
+	}
 	for i := 0; i <= len(s)-len(sub); i++ {
 		if s[i:i+len(sub)] == sub {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
+}
+
+func lowercase(s string) string {
+	out := []byte(s)
+	for i := range out {
+		if out[i] >= 'A' && out[i] <= 'Z' {
+			out[i] = out[i] + ('a' - 'A')
+		}
+	}
+	return string(out)
 }

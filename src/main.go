@@ -20,6 +20,8 @@ func main() {
 		handleCreator()
 	case "dashboard":
 		handleDashboard()
+	case "save":
+		handleSave()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -32,9 +34,11 @@ func printUsage() {
 ==============================
 Commands:
   personality [--name NAME] [--act TEXT]  Show/interact with personality
-  decision [--context TEXT]               Run autonomous decision cycle
+  decision [--name NAME] [--context TEXT] Run autonomous decision cycle
   creator                                 Show creator stats and reports
-  dashboard                               Print full system dashboard`)
+  dashboard [--name NAME]                 Print full system dashboard
+  save                                    Save current persona state
+`)
 }
 
 func handlePersonality() {
@@ -63,33 +67,36 @@ func handlePersonality() {
 }
 
 func handleDecision() {
+	name := "AURA"
 	var ctxText string
 	for i := 2; i < len(os.Args); i++ {
-		if os.Args[i] == "--context" && i+1 < len(os.Args) {
-			ctxText = os.Args[i+1]
-			i++
+		switch os.Args[i] {
+		case "--name":
+			if i+1 < len(os.Args) {
+				name = os.Args[i+1]
+				i++
+			}
+		case "--context":
+			if i+1 < len(os.Args) {
+				ctxText = os.Args[i+1]
+				i++
+			}
 		}
 	}
+	p := NewPersonality(name)
+	p.Tick()
 	ctx := Context{
 		Tasks:       []string{},
-		Resources:   0.7 + rand.Float64()*0.2,
+		Resources:   clamp(0.5+p.Mood.Energy*0.3, 0.2, 1.0),
 		TimeLeft:    0.8,
-		Stress:      0.2 + rand.Float64()*0.2,
-		Opportunity: 0.5 + rand.Float64()*0.4,
+		Stress:      clamp(0.1+p.getTrait("neuroticism")*0.3, 0.05, 0.8),
+		Opportunity: clamp(p.Mood.Creative*0.5+rand.Float64()*0.2, 0.2, 1.0),
 	}
 	if ctxText != "" {
 		ctx.Tasks = append(ctx.Tasks, ctxText)
 	}
-	traits := map[string]float64{
-		"creative":          0.8,
-		"curiosity":         0.9,
-		"openness":          0.75,
-		"empathy":           0.85,
-		"risk_tolerance":    0.5,
-		"conscientiousness": 0.7,
-	}
 	engine := NewEngine()
-	d := engine.Decide(ctx, traits)
+	d := engine.Decide(ctx, p.ToTraitsMap())
 	fmt.Printf("Decision #%d: %s\n", d.ID, d.Chosen)
 	fmt.Printf("Reason: %s\n", d.Reason)
 	fmt.Printf("Confidence: %.2f | Category: %s\n", d.Confidence, d.Category)
@@ -104,21 +111,50 @@ func handleCreator() {
 		stats["avg_quality"], stats["total_artifacts"].(int), stats["total_plans"].(int))
 }
 
+func handleSave() {
+	name := "AURA"
+	for i := 2; i < len(os.Args); i++ {
+		if os.Args[i] == "--name" && i+1 < len(os.Args) {
+			name = os.Args[i+1]
+			i++
+		}
+	}
+	p := NewPersonality(name)
+	p.Tick()
+	p.save()
+	fmt.Printf("Saved personality: %s\n", p.Name)
+	fmt.Printf("Traits: curiosity=%.2f empathy=%.2f creativity=%.2f\n",
+		p.getTrait("curiosity"), p.getTrait("empathy"), p.getTrait("creative"))
+	fmt.Printf("Memories: %d | Actions: %d\n", len(p.Memory), len(p.Actions))
+}
+
 func handleDashboard() {
+	name := "AURA"
+	for i := 2; i < len(os.Args); i++ {
+		if os.Args[i] == "--name" && i+1 < len(os.Args) {
+			name = os.Args[i+1]
+			i++
+		}
+	}
+
+	p := NewPersonality(name)
+	p.Tick()
+
 	fmt.Println("============================================================")
 	fmt.Println("        Digital Creator Workspace - Dashboard")
 	fmt.Println("============================================================")
 	fmt.Println()
 
-	p := NewPersonality("AURA")
-	p.Tick()
 	fmt.Println("--- AI PERSONALITY ---")
 	fmt.Println(p.Report())
 	fmt.Println()
 
 	engine := NewEngine()
-	d := engine.Decide(Context{Resources: 0.8, Stress: 0.3},
-		map[string]float64{"creative": 0.8, "curiosity": 0.9})
+	d := engine.Decide(Context{
+		Resources:   clamp(0.5+p.Mood.Energy*0.3, 0.2, 1.0),
+		Stress:      clamp(0.1+p.getTrait("neuroticism")*0.3, 0.05, 0.8),
+		Opportunity: clamp(p.Mood.Creative*0.5+0.2, 0.2, 1.0),
+	}, p.ToTraitsMap())
 	fmt.Printf("Latest Decision: %s (confidence: %.2f)\n", d.Chosen, d.Confidence)
 	fmt.Println(engine.Report())
 	fmt.Println()

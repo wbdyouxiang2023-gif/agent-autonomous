@@ -305,7 +305,7 @@ func ReflectAction(name, action string) string {
 	b, _ := json.MarshalIndent(map[string]interface{}{
 		"mood":     p.Mood,
 		"actions":  p.Actions,
-		"memories": len(p.memory),
+		"memories": len(p.Memory),
 	}, "", "  ")
 	return string(b)
 }

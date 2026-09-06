@@ -113,15 +113,16 @@ func (e *Engine) save() {
 	os.WriteFile(e.storePath, data, 0644)
 }
 
-// Decide makes an autonomous choice based on current context
+// Decide makes an autonomous choice based on current context and personality traits
 func (e *Engine) Decide(ctx Context, traits map[string]float64) Decision {
 	options := generateOptions(ctx, traits)
 	chosen := pickBest(options)
+	conf := calcConfidence(chosen, options)
 	d := Decision{
 		ID:         e.nextID,
 		Chosen:     chosen.Label,
 		Reason:     chosen.Reason,
-		Confidence: chosen.Score,
+		Confidence: conf,
 		Category:   chosen.Category,
 		Timestamp:  time.Now().Format("2006-01-02 15:04:05"),
 	}
@@ -132,6 +133,14 @@ func (e *Engine) Decide(ctx Context, traits map[string]float64) Decision {
 	}
 	e.save()
 	return d
+}
+
+func calcConfidence(chosen Option, all []Option) float64 {
+	if len(all) < 2 {
+		return 0.9
+	}
+	gap := chosen.Score - all[1].Score
+	return clamp(0.5+gap*2, 0.3, 0.99)
 }
 
 func generateOptions(ctx Context, traits map[string]float64) []Option {
