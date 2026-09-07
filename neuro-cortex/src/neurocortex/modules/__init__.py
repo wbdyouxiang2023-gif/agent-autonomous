@@ -16,6 +16,7 @@ from ..event import (
 )
 from ..feedback import BasicFeedback
 from ..decision import BasicDecision
+from ..action import BasicAction
 
 if TYPE_CHECKING:
     from ..event import CortexEvent
@@ -128,19 +129,13 @@ class MockDecision(DecisionModule):
 
 
 class MockAction(ActionModule):
-    """Basic action: execute and record action data only. Does NOT produce outcome."""
+    """Phase 8 v1 action: symbolic execution via BasicAction."""
+
+    def __init__(self) -> None:
+        self._action = BasicAction()
 
     def process(self, event: CortexEvent) -> CortexEvent:
-        action_type = event.decision.selected_action
-        payload = {"text": event.raw_input}
-        event.act(ActionData(
-            action_type=action_type,
-            action_payload=payload,
-            status="success",
-            planned=True,
-            actual=True,
-        ))
-        return event
+        return self._action.process(event)
 
 
 class MockOutcomeProvider(OutcomeProvider):
