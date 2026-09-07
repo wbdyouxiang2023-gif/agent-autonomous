@@ -33,11 +33,12 @@ class Pattern:
                    ↓
                 RETIRED
 
-    Confidence Model:
-      confidence = success_rate * weight(support_count, contradiction_rate)
+    Support Score Model:
+      support_score = success_rate * weight(support_count, contradiction_rate)
       - success_rate = success_count / total
-      - weight increases with support_count (sigmoid-like)
+      - weight increases with support_count (step function)
       - weight decreases with contradiction_rate
+      - NOT a probability: it is a quality weight for experience evidence
     """
 
     # Identity
@@ -56,7 +57,17 @@ class Pattern:
     # Evidence
     support_count: int = 0        # experiences matching this condition
     contradiction_count: int = 0  # experiences that disagree with majority outcome
-    confidence: float = 0.0       # 0.0–1.0, derived from support + contradiction
+    support_score: float = 0.0    # 0.0–1.0, quality weight for evidence (NOT a probability)
+
+    # Backward-compatible alias: confidence → support_score
+    @property
+    def confidence(self) -> float:
+        """Deprecated alias for support_score. Use support_score instead."""
+        return self.support_score
+
+    @confidence.setter
+    def confidence(self, value: float) -> None:
+        self.support_score = value
 
     # Lifecycle
     status: str = "CANDIDATE"     # CANDIDATE | OBSERVED | SUPPORTED | STABLE | WEAKENING | RETIRED
@@ -75,7 +86,7 @@ class Pattern:
             "success_rate": self.success_rate,
             "support_count": self.support_count,
             "contradiction_count": self.contradiction_count,
-            "confidence": self.confidence,
+            "support_score": self.support_score,
             "status": self.status,
             "last_observed_at": self.last_observed_at,
             "last_contradicted_at": self.last_contradicted_at,
@@ -83,9 +94,16 @@ class Pattern:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Pattern":
-        """Deserialize from dict, handling missing fields gracefully."""
+        """Deserialize from dict, handling missing fields gracefully.
+
+        Backward-compatible: reads both 'support_score' (new) and
+        'confidence' (legacy) field names.
+        """
         allowed = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in allowed}
+        # Legacy: map 'confidence' → 'support_score'
+        if "confidence" in filtered and "support_score" not in filtered:
+            filtered["support_score"] = filtered.pop("confidence")
         return cls(**filtered)
 
     @classmethod
@@ -112,7 +130,7 @@ class Pattern:
                 predicted_outcome=predicted_outcome or f"{condition_intent}完成",
                 success_rate=0.5,
                 support_count=0,
-                confidence=0.0,
+                support_score=0.0,
                 status="CANDIDATE",
             )
 
@@ -134,8 +152,8 @@ class Pattern:
             intent_label = condition_intent or "general"
             predicted_outcome = f"{intent_label}完成"
 
-        # Compute confidence using evidence model
-        confidence = cls._compute_confidence(success_rate, total, contradiction_count, total)
+        # Compute support_score using evidence model
+        support_score = cls._compute_support_score(success_rate, total, contradiction_count, total)
 
         # Determine lifecycle status
         status = cls._determine_status(total, contradiction_count, success_rate)
@@ -154,23 +172,23 @@ class Pattern:
             success_rate=success_rate,
             support_count=total,
             contradiction_count=contradiction_count,
-            confidence=confidence,
+            support_score=support_score,
             status=status,
             last_observed_at=datetime.now(timezone.utc).isoformat(),
             last_contradicted_at=datetime.now(timezone.utc).isoformat() if contradiction_count > 0 else None,
         )
 
     @staticmethod
-    def _compute_confidence(
+    def _compute_support_score(
         success_rate: float,
         support_count: int,
         contradiction_count: int,
         total: int,
     ) -> float:
         """
-        Compute pattern confidence from evidence.
+        Compute pattern support_score from evidence.
 
-        Formula: confidence = success_rate * evidence_weight
+        Formula: support_score = success_rate * evidence_weight
 
         evidence_weight:
           - 0 experiences: 0.0
@@ -193,11 +211,11 @@ class Pattern:
         # Contradiction penalty
         contradiction_rate = contradiction_count / total if total > 0 else 0.0
         if contradiction_rate > 0.5:
-            # Actively wrong pattern — cap confidence
+            # Actively wrong pattern — cap support_score
             return min(success_rate * evidence_weight, 0.2)
 
-        confidence = success_rate * evidence_weight
-        return max(0.0, min(1.0, confidence))
+        support_score = success_rate * evidence_weight
+        return max(0.0, min(1.0, support_score))
 
     @staticmethod
     def _determine_status(
@@ -248,5 +266,5 @@ class Pattern:
         return (
             f"Pattern(id={self.pattern_id}, condition=({self.condition_intent!r},"
             f" {self.condition_action_type!r}), rate={self.success_rate:.2f},"
-            f" conf={self.confidence:.2f}, status={self.status})"
+            f" support={self.support_score:.2f}, status={self.status})"
         )

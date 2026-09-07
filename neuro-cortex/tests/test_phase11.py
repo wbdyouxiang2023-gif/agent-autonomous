@@ -448,9 +448,9 @@ class TestExperiencePrediction:
         retriever = ExperienceRetriever(store)
         pred = ExperiencePredictionModule(retriever, base_prediction=BasicPrediction())
         
-        assert pred.experience_weight == 0.3
-        pred.experience_weight = 0.5
-        assert pred.experience_weight == 0.5
+        assert pred.evidence_weight == 0.3
+        pred.evidence_weight = 0.5
+        assert pred.evidence_weight == 0.5
 
 
 # ═══════════════════════════════════════════════════════════════════

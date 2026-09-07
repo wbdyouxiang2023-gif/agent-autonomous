@@ -16,7 +16,7 @@ class PatternRetriever:
     Matching criteria:
     1. Exact intent match (highest priority)
     2. Exact action_type match
-    3. Pattern confidence ranking
+    3. Pattern support_score ranking
     4. Only active patterns are returned
 
     Unlike ExperienceRetriever, PatternRetriever does NOT do keyword matching.
@@ -40,7 +40,7 @@ class PatternRetriever:
             action_type: Target action type to match
 
         Returns:
-            List of (pattern, relevance_score) tuples sorted by confidence.
+            List of (pattern, relevance_score) tuples sorted by support_score.
             Only active patterns are returned.
         """
         patterns = self._store.list_active()
@@ -53,7 +53,7 @@ class PatternRetriever:
             if score > 0:
                 scored.append((pat, score))
 
-        scored.sort(key=lambda x: (x[1], x[0].confidence), reverse=True)
+        scored.sort(key=lambda x: (x[1], x[0].support_score), reverse=True)
         return scored[:self._top_k]
 
     def _calculate_score(
@@ -68,11 +68,11 @@ class PatternRetriever:
         Scoring:
           - Intent match: +0.5
           - Action type match: +0.3
-          - Confidence weight: × pat.confidence
+          - Confidence weight: × pat.support_score
         """
         if not query_intent and not query_action_type:
-            # No query condition — return all active patterns with base confidence
-            return pat.confidence * 0.5
+            # No query condition — return all active patterns with base support_score
+            return pat.support_score * 0.5
 
         score = 0.0
 
@@ -82,8 +82,8 @@ class PatternRetriever:
         if query_action_type and pat.condition_action_type == query_action_type:
             score += 0.3
 
-        # Scale by confidence (active patterns already have confidence > 0)
-        score *= max(pat.confidence, 0.1)
+        # Scale by support_score (active patterns already have confidence > 0)
+        score *= max(pat.support_score, 0.1)
 
         return score
 

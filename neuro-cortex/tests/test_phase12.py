@@ -151,7 +151,7 @@ class TestPatternSchema:
             success_rate=0.8,
             support_count=5,
             contradiction_count=1,
-            confidence=0.6,
+            support_score=0.6,
             status="SUPPORTED",
         )
         d = pat.to_dict()
@@ -160,7 +160,7 @@ class TestPatternSchema:
         assert d["success_rate"] == 0.8
         assert d["support_count"] == 5
         assert d["contradiction_count"] == 1
-        assert d["confidence"] == 0.6
+        assert d["support_score"] == 0.6
         assert d["status"] == "SUPPORTED"
 
     def test_pattern_deserialization(self):
@@ -171,7 +171,7 @@ class TestPatternSchema:
             "success_rate": 0.8,
             "support_count": 5,
             "contradiction_count": 1,
-            "confidence": 0.6,
+            "support_score": 0.6,
             "status": "SUPPORTED",
         }
         pat = Pattern.from_dict(data)
@@ -269,7 +269,7 @@ class TestPatternConsolidator:
         p = patterns[0]
         assert p.support_count == 5
         assert p.status == "STABLE"
-        assert p.confidence >= 0.7
+        assert p.support_score >= 0.7
 
     def test_mixed_outcomes_create_weakening(self):
         store = ExperienceStore(None)
@@ -321,8 +321,8 @@ class TestExperimentP6MajorityBias:
         assert p.success_rate == 0.7
         assert p.support_count == 10
         # Confidence should reflect the 70% rate, not 100%
-        assert p.confidence < 0.8
-        assert p.confidence > 0.5
+        assert p.support_score < 0.8
+        assert p.support_score > 0.5
 
 
 class TestExperimentP7WrongMajority:
@@ -339,7 +339,7 @@ class TestExperimentP7WrongMajority:
         assert p.success_rate == 0.2
         # 1/5 = 20% contradiction ≤ 20% → STABLE (but low confidence due to low success_rate)
         assert p.status == "STABLE"
-        assert p.confidence < 0.3
+        assert p.support_score < 0.3
 
 
 class TestExperimentP8NewOverturnsOld:
@@ -388,7 +388,7 @@ class TestExperimentP10PatternRetirement:
         store = PatternStore(None)
         pat = Pattern(
             pattern_id="p1", condition_intent="fix", condition_action_type="code_review",
-            success_rate=0.9, support_count=5, confidence=0.8, status="STABLE",
+            success_rate=0.9, support_count=5, support_score=0.8, status="STABLE",
         )
         store.save(pat)
         retr = PatternRetriever(store)
@@ -409,7 +409,7 @@ class TestExperimentP11NoPatternFallback:
         pat_retriever = PatternRetriever(pat_store)
         pred = ExperiencePredictionModule(exp_retriever, base_prediction=BasicPrediction())
         pred.set_pattern_retriever(pat_retriever)
-        pred._pattern_weight = 0.0  # disable pattern to isolate
+        pred._quality_floor = 0.0  # disable pattern to isolate
 
         cortex = NeuroCortex(
             perception=MockPerception(), representation=MockRepresentation(),
@@ -433,7 +433,7 @@ class TestExperimentP12PatternChangesPrediction:
         # Strong pattern: fix → 90% success
         pat_store.save(Pattern(
             pattern_id="p1", condition_intent="fix", condition_action_type="code_review",
-            success_rate=0.9, support_count=5, confidence=0.85, status="STABLE",
+            success_rate=0.9, support_count=5, support_score=0.85, status="STABLE",
         ))
         pat_retriever = PatternRetriever(pat_store)
 
@@ -477,7 +477,7 @@ class TestExperimentP13WrongPatternDoesNotPollute:
         pat_store.save(Pattern(
             pattern_id="p-bad", condition_intent="fix", condition_action_type="code_review",
             success_rate=0.2, support_count=5, contradiction_count=4,
-            confidence=0.1, status="WEAKENING",
+            support_score=0.1, status="WEAKENING",
         ))
         pat_retriever = PatternRetriever(pat_store)
 
@@ -505,7 +505,7 @@ class TestExperimentP14RestartPersistence:
         pat_store1 = PatternStore(store_path)
         pat_store1.save(Pattern(
             pattern_id="p1", condition_intent="fix", condition_action_type="code_review",
-            success_rate=0.9, support_count=5, confidence=0.8, status="STABLE",
+            success_rate=0.9, support_count=5, support_score=0.8, status="STABLE",
         ))
         assert pat_store1.count() == 1
 
@@ -522,9 +522,9 @@ class TestExperimentP15CortexIsolation:
         store_a = PatternStore(None)
         store_b = PatternStore(None)
         store_a.save(Pattern(pattern_id="pa", condition_intent="fix", status="STABLE",
-                            success_rate=0.9, support_count=5, confidence=0.8))
+                            success_rate=0.9, support_count=5, support_score=0.8))
         store_b.save(Pattern(pattern_id="pb", condition_intent="create", status="STABLE",
-                            success_rate=0.8, support_count=3, confidence=0.6))
+                            success_rate=0.8, support_count=3, support_score=0.6))
         retr_a = PatternRetriever(store_a)
         retr_b = PatternRetriever(store_b)
         results_a = retr_a.retrieve(intent="fix")
@@ -581,6 +581,244 @@ class TestExperimentP17FullIntegration:
         e = cortex.process("fix a new bug")
         assert e.stage == "LEARNING"
         assert e.prediction.success_probability > 0.5
+
+
+
+class TestEvidenceIntegrity:
+    """Evidence Integrity regression tests — double counting fix."""
+
+    def test_no_double_counting_4of5_success(self):
+        """
+        P17 regression: 5 experiences (4 success), top-3 all success.
+        Old Scheme A: 0.30×1.0 + 0.15×0.80 = 0.425 shift
+        New Scheme B: 0.30×(1.0×0.72) = 0.216 shift
+        Prediction must be LOWER than old scheme.
+        """
+        from neurocortex.event import Experience
+        from neurocortex.memory.experience_store import ExperienceStore
+        from neurocortex.memory.experience_retriever import ExperienceRetriever
+        from neurocortex.pattern import PatternConsolidator, PatternStore, PatternRetriever
+        from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
+        from neurocortex.prediction import BasicPrediction
+        from neurocortex.modules import MockPerception, MockRepresentation, MockAttention
+        from neurocortex.state import BasicStateModule
+        from neurocortex.modules import MockMemory, MockDecision, MockAction, MockOutcomeProvider
+        from neurocortex.modules import MockFeedback
+        from neurocortex.learning import ExperienceLearningModule
+        from neurocortex.cortex import NeuroCortex
+
+        store = ExperienceStore(None)
+        for i in range(5):
+            store.save(Experience(
+                experience_id=f"e{i}", timestamp="2026-09-07T00:00:00+00:00",
+                source_event_id=f"evt-{i}", raw_input=f"fix bug {i}",
+                intent="fix", action_type="code_review",
+                predicted_outcome="fix完成", predicted_prob=0.8,
+                actual_outcome="done", success=(i < 4),
+                prediction_error=0.2, evaluation="correct",
+                confidence=0.55, uncertainty=0.2,
+                context_tags=[f"intent:fix", f"action:code_review",
+                              "outcome:success" if i < 4 else "outcome:failure"],
+            ))
+
+        cons = PatternConsolidator()
+        patterns = cons.consolidate(store)
+        pat_store = PatternStore(None)
+        pat_store.save_all(patterns)
+
+        exp_retr = ExperienceRetriever(store, top_k=3)
+        pat_retr = PatternRetriever(pat_store)
+        pred = ExperiencePredictionModule(exp_retr, base_prediction=BasicPrediction())
+        pred.set_pattern_retriever(pat_retr)
+
+        cortex = NeuroCortex(
+            perception=MockPerception(), representation=MockRepresentation(),
+            attention=MockAttention(), state=BasicStateModule(), memory=MockMemory(),
+            prediction=pred, decision=MockDecision(), action=MockAction(),
+            outcome_provider=MockOutcomeProvider(), feedback=MockFeedback(),
+            learning=ExperienceLearningModule(store),
+        )
+        e = cortex.process("fix a bug")
+
+        # With Scheme B: adjusted = 1.0 × clamp(0.72, 0.5, 1.0) = 0.72
+        # prediction = 0.70 × 0.80 + 0.30 × 0.72 = 0.776
+        # Old Scheme A would give: 0.55 × 0.80 + 0.30 × 1.0 + 0.15 × 0.80 = 0.86
+        assert e.prediction.success_probability < 0.82,             f"Double counting not fixed: prob={e.prediction.success_probability:.4f}"
+        assert e.prediction.success_probability >= 0.75,             f"Evidence too dampened: prob={e.prediction.success_probability:.4f}"
+
+    def test_no_pattern_same_as_phase11(self):
+        """No pattern → identity transform → same as Phase 11."""
+        from neurocortex.event import Experience
+        from neurocortex.memory.experience_store import ExperienceStore
+        from neurocortex.memory.experience_retriever import ExperienceRetriever
+        from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
+        from neurocortex.prediction import BasicPrediction
+        from neurocortex.modules import MockPerception, MockRepresentation, MockAttention
+        from neurocortex.state import BasicStateModule
+        from neurocortex.modules import MockMemory, MockDecision, MockAction, MockOutcomeProvider
+        from neurocortex.modules import MockFeedback
+        from neurocortex.learning import ExperienceLearningModule
+        from neurocortex.cortex import NeuroCortex
+
+        store = ExperienceStore(None)
+        for i in range(3):
+            store.save(Experience(
+                experience_id=f"e{i}", timestamp="2026-09-07T00:00:00+00:00",
+                source_event_id=f"evt-{i}", raw_input=f"fix bug {i}",
+                intent="fix", action_type="code_review",
+                predicted_outcome="fix完成", predicted_prob=0.8,
+                actual_outcome="done", success=True,
+                prediction_error=0.2, evaluation="correct",
+                confidence=0.55, uncertainty=0.2,
+                context_tags=["intent:fix", "action:code_review", "outcome:success"],
+            ))
+
+        exp_retr = ExperienceRetriever(store, top_k=3)
+        # NO pattern retriever set → Phase 11 behavior
+        pred = ExperiencePredictionModule(exp_retr, base_prediction=BasicPrediction())
+
+        cortex = NeuroCortex(
+            perception=MockPerception(), representation=MockRepresentation(),
+            attention=MockAttention(), state=BasicStateModule(), memory=MockMemory(),
+            prediction=pred, decision=MockDecision(), action=MockAction(),
+            outcome_provider=MockOutcomeProvider(), feedback=MockFeedback(),
+            learning=ExperienceLearningModule(store),
+        )
+        e = cortex.process("fix a bug")
+
+        # empirical_rate = 3/3 = 1.0, no pattern → quality_factor = 1.0
+        # prediction = 0.70 × 0.80 + 0.30 × 1.0 = 0.86
+        expected = 0.70 * 0.80 + 0.30 * 1.0
+        assert abs(e.prediction.success_probability - expected) < 0.001,             f"Phase 11 behavior not preserved: got {e.prediction.success_probability:.4f}, expected {expected}"
+
+    def test_pattern_dampens_overconfident_rate(self):
+        """Pattern should reduce overconfident top-k rates."""
+        from neurocortex.event import Experience
+        from neurocortex.memory.experience_store import ExperienceStore
+        from neurocortex.memory.experience_retriever import ExperienceRetriever
+        from neurocortex.pattern import PatternConsolidator, PatternStore, PatternRetriever
+        from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
+        from neurocortex.prediction import BasicPrediction
+        from neurocortex.modules import MockPerception, MockRepresentation, MockAttention
+        from neurocortex.state import BasicStateModule
+        from neurocortex.modules import MockMemory, MockDecision, MockAction, MockOutcomeProvider
+        from neurocortex.modules import MockFeedback
+        from neurocortex.learning import ExperienceLearningModule
+        from neurocortex.cortex import NeuroCortex
+
+        store = ExperienceStore(None)
+        # 5 total: 4 success, 1 failure
+        for i in range(5):
+            store.save(Experience(
+                experience_id=f"e{i}", timestamp="2026-09-07T00:00:00+00:00",
+                source_event_id=f"evt-{i}", raw_input=f"fix bug {i}",
+                intent="fix", action_type="code_review",
+                predicted_outcome="fix完成", predicted_prob=0.8,
+                actual_outcome="done", success=(i < 4),
+                prediction_error=0.2, evaluation="correct",
+                confidence=0.55, uncertainty=0.2,
+                context_tags=[f"intent:fix", f"action:code_review",
+                              "outcome:success" if i < 4 else "outcome:failure"],
+            ))
+
+        cons = PatternConsolidator()
+        patterns = cons.consolidate(store)
+        pat_store = PatternStore(None)
+        pat_store.save_all(patterns)
+
+        exp_retr = ExperienceRetriever(store, top_k=3)
+        pat_retr = PatternRetriever(pat_store)
+        pred = ExperiencePredictionModule(exp_retr, base_prediction=BasicPrediction())
+        pred.set_pattern_retriever(pat_retr)
+
+        cortex = NeuroCortex(
+            perception=MockPerception(), representation=MockRepresentation(),
+            attention=MockAttention(), state=BasicStateModule(), memory=MockMemory(),
+            prediction=pred, decision=MockDecision(), action=MockAction(),
+            outcome_provider=MockOutcomeProvider(), feedback=MockFeedback(),
+            learning=ExperienceLearningModule(store),
+        )
+        e = cortex.process("fix a bug")
+
+        # top-3 all success → empirical_rate=1.0
+        # pattern support_score=0.72 → quality_factor=clamp(0.72, 0.5, 1.0)=0.72
+        # adjusted = 1.0 × 0.72 = 0.72
+        # prediction = 0.70 × 0.80 + 0.30 × 0.72 = 0.776
+        # Without pattern: 0.70 × 0.80 + 0.30 × 1.0 = 0.86
+        # So with pattern it should be LOWER
+        assert e.prediction.success_probability < 0.86,             f"Pattern should dampen overconfident rate, got {e.prediction.success_probability:.4f}"
+
+    def test_support_score_not_probability(self):
+        """support_score is a quality weight, not a probability."""
+        from neurocortex.pattern import Pattern
+        p = Pattern(
+            pattern_id="test", condition_intent="fix", condition_action_type="code_review",
+            success_rate=1.0, support_count=5, support_score=0.9, status="STABLE",
+        )
+        # support_score should be accessible
+        assert p.support_score == 0.9
+        # backward-compatible alias
+        assert p.confidence == 0.9
+        # But it's NOT a probability — it can't be interpreted as P(true)
+        # The value 0.9 means "strong evidence" not "90% chance"
+        assert isinstance(p.support_score, float)
+        assert 0.0 <= p.support_score <= 1.0
+
+    def test_deterministic_replay(self):
+        """Same input + same evidence → same output."""
+        from neurocortex.event import Experience
+        from neurocortex.memory.experience_store import ExperienceStore
+        from neurocortex.memory.experience_retriever import ExperienceRetriever
+        from neurocortex.pattern import PatternConsolidator, PatternStore, PatternRetriever
+        from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
+        from neurocortex.prediction import BasicPrediction
+        from neurocortex.modules import MockPerception, MockRepresentation, MockAttention
+        from neurocortex.state import BasicStateModule
+        from neurocortex.modules import MockMemory, MockDecision, MockAction, MockOutcomeProvider
+        from neurocortex.modules import MockFeedback
+        from neurocortex.learning import ExperienceLearningModule
+        from neurocortex.cortex import NeuroCortex
+
+        store = ExperienceStore(None)
+        for i in range(5):
+            store.save(Experience(
+                experience_id=f"e{i}", timestamp="2026-09-07T00:00:00+00:00",
+                source_event_id=f"evt-{i}", raw_input=f"fix bug {i}",
+                intent="fix", action_type="code_review",
+                predicted_outcome="fix完成", predicted_prob=0.8,
+                actual_outcome="done", success=(i < 4),
+                prediction_error=0.2, evaluation="correct",
+                confidence=0.55, uncertainty=0.2,
+                context_tags=[f"intent:fix", f"action:code_review",
+                              "outcome:success" if i < 4 else "outcome:failure"],
+            ))
+
+        # Use isolated stores per iteration to prevent cross-contamination
+        results = []
+        for _ in range(3):
+            iter_store = ExperienceStore(None)
+            for e in store.list_all():
+                iter_store.save(e)
+            cons = PatternConsolidator()
+            patterns = cons.consolidate(iter_store)
+            pat_store = PatternStore(None)
+            pat_store.save_all(patterns)
+            exp_retr = ExperienceRetriever(iter_store, top_k=3)
+            pat_retr = PatternRetriever(pat_store)
+            pred = ExperiencePredictionModule(exp_retr, base_prediction=BasicPrediction())
+            pred.set_pattern_retriever(pat_retr)
+            cortex = NeuroCortex(
+                perception=MockPerception(), representation=MockRepresentation(),
+                attention=MockAttention(), state=BasicStateModule(), memory=MockMemory(),
+                prediction=pred, decision=MockDecision(), action=MockAction(),
+                outcome_provider=MockOutcomeProvider(), feedback=MockFeedback(),
+                learning=ExperienceLearningModule(iter_store),
+            )
+            e = cortex.process("fix a bug")
+            results.append(e.prediction.success_probability)
+
+        assert all(r == results[0] for r in results),             f"Non-deterministic: {results}"
+
 
 
 class TestRegression:
