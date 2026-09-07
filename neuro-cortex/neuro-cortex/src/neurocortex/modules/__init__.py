@@ -14,7 +14,6 @@ from ..event import (
     MemoryData, PredictionData, DecisionData, ActionData,
     OutcomeData, FeedbackData, LearningData,
 )
-from ..prediction import BasicPrediction
 
 if TYPE_CHECKING:
     from ..event import CortexEvent
@@ -103,13 +102,17 @@ class MockMemory(MemoryModule):
 
 
 class MockPrediction(PredictionModule):
-    """Basic prediction using BasicPrediction with default settings."""
-
-    def __init__(self, state_store=None):
-        self._pred = BasicPrediction(state_store)
+    """Basic prediction: estimate success based on input length heuristic."""
 
     def process(self, event: CortexEvent) -> CortexEvent:
-        return self._pred.process(event)
+        prob = min(max(len(event.raw_input) / 50.0, 0.2), 0.9)
+        event.predict(PredictionData(
+            predicted_outcome="task completes",
+            success_probability=prob,
+            predicted_risk=1.0 - prob,
+            prediction_confidence=0.5,
+        ))
+        return event
 
 
 class MockDecision(DecisionModule):

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypeVar
 
 from .event import CortexEvent
-from .state.cortex_state import CortexState
 
 if TYPE_CHECKING:
     from .interfaces import (
@@ -60,7 +59,6 @@ class NeuroCortex:
         outcome_provider: OutcomeProvider | None = None,
         feedback: FeedbackModule | None = None,
         learning: LearningModule | None = None,
-        state_store: CortexState | None = None,
     ) -> None:
         self._perception = perception
         self._representation = representation
@@ -73,11 +71,6 @@ class NeuroCortex:
         self._outcome_provider = outcome_provider
         self._feedback = feedback
         self._learning = learning
-        self._state_store = (
-            state_store
-            if state_store is not None
-            else CortexState()
-        )
 
     # ── Public API ───────────────────────────────────────────────
 
@@ -88,17 +81,8 @@ class NeuroCortex:
         Returns the completed CortexEvent (stage=LEARNING or stage=error_stage on failure).
         """
         event = CortexEvent(raw_input=raw_input)
-
-        # ONE-WAY SNAPSHOT: CortexState → event.state
-        event.state = self._state_store.to_internal_state()
-
         try:
             event = self._run_stages(event)
-
-            # AUTHORIZED TRANSITION (single commit point)
-            if event.stage == "LEARNING":
-                self._state_store.update_from_event(event)
-
         except Exception as exc:
             event.status = "error"
             event.error = str(exc)
@@ -202,8 +186,3 @@ class NeuroCortex:
     @property
     def outcome_provider(self):
         return self._outcome_provider
-
-    @property
-    def state_store(self) -> CortexState:
-        """Access the persistent session state."""
-        return self._state_store
