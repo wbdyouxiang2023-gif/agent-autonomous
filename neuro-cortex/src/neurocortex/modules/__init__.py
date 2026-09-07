@@ -14,7 +14,7 @@ from ..event import (
     MemoryData, PredictionData, DecisionData, ActionData,
     OutcomeData, FeedbackData, LearningData,
 )
-from ..prediction import BasicPrediction
+from ..feedback import BasicFeedback
 
 if TYPE_CHECKING:
     from ..event import CortexEvent
@@ -103,13 +103,17 @@ class MockMemory(MemoryModule):
 
 
 class MockPrediction(PredictionModule):
-    """Basic prediction using BasicPrediction with default settings."""
-
-    def __init__(self, state_store=None):
-        self._pred = BasicPrediction(state_store)
+    """Basic prediction: estimate success based on input length heuristic."""
 
     def process(self, event: CortexEvent) -> CortexEvent:
-        return self._pred.process(event)
+        prob = min(max(len(event.raw_input) / 50.0, 0.2), 0.9)
+        event.predict(PredictionData(
+            predicted_outcome="task completes",
+            success_probability=prob,
+            predicted_risk=1.0 - prob,
+            prediction_confidence=0.5,
+        ))
+        return event
 
 
 class MockDecision(DecisionModule):
@@ -177,18 +181,27 @@ class FailingOutcomeProvider(OutcomeProvider):
 
 
 class MockFeedback(FeedbackModule):
-    """Basic feedback: compute reward from prediction-outcome match."""
+    """Phase 6 v2.1 feedback: evaluation via BasicFeedback contract.
+
+    Note: reward computation is preserved for backward compatibility
+    with existing regression tests. BasicFeedback itself does not modify reward.
+    """
+
+    def __init__(self) -> None:
+        self._feedback = BasicFeedback()
 
     def process(self, event: CortexEvent) -> CortexEvent:
+        # Run Phase 6 evaluation (does not modify reward)
+        event = self._feedback.process(event)
+        # Preserve legacy reward computation for backward compatibility
         predicted = event.prediction.success_probability
         actual_success = event.outcome.success
         reward = 1.0 if actual_success else -0.5
-        prediction_error = abs(predicted - (1.0 if actual_success else 0.0))
-        event.compute_feedback(FeedbackData(
+        event.feedback = FeedbackData(
             reward=reward,
-            prediction_error=prediction_error,
-            evaluation="predicted_success" if actual_success else "prediction_miss",
-        ))
+            prediction_error=event.feedback.prediction_error,
+            evaluation=event.feedback.evaluation,
+        )
         return event
 
 
