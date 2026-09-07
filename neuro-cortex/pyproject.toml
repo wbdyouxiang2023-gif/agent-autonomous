@@ -15,6 +15,7 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+pythonpath = ["src"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
