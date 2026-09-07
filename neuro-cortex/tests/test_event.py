@@ -1,7 +1,7 @@
 """Phase 1 tests for CortexEvent."""
 import json
 import pytest
-from src.neurocortex.event import (
+from neurocortex.event import (
     CortexEvent,
     PerceptionData,
     RepresentationData,

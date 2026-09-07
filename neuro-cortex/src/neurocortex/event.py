@@ -257,6 +257,11 @@ class CortexEvent:
         self.feedback: FeedbackData = FeedbackData()
         self.learning: LearningData = LearningData()
 
+        # Error tracking — set by Cortex when a module raises
+        self.error: str = ""
+        self.error_stage: str = ""
+        self.status: str = "ok"  # "ok" | "error"
+
     # ── Stage transitions ─────────────────────────────────────
 
     def advance_to(self, target_stage: str) -> None:
@@ -428,6 +433,9 @@ class CortexEvent:
             "outcome": _convert(self.outcome),
             "feedback": _convert(self.feedback),
             "learning": _convert(self.learning),
+            "error": self.error,
+            "error_stage": self.error_stage,
+            "status": self.status,
         }
 
     def to_json(self, indent: int = 2) -> str:
@@ -460,6 +468,10 @@ class CortexEvent:
         _restore(FeedbackData, "feedback", data.get("feedback"))
         _restore(LearningData, "learning", data.get("learning"))
 
+        event.error = data.get("error", "")
+        event.error_stage = data.get("error_stage", "")
+        event.status = data.get("status", "ok")
+
         return event
 
     @classmethod
@@ -487,8 +499,13 @@ class CortexEvent:
             lines.append(f"  action: {self.action.status} — {self.action.action_type}")
         if self.outcome.actual_outcome:
             lines.append(f"  outcome: {'success' if self.outcome.success else 'failure'}")
+        if self.feedback.reward != 0.0:
+            lines.append(f"  feedback: reward={self.feedback.reward:.2f} "
+                         f"error={self.feedback.prediction_error:.2f}")
         if self.learning.learning_signal:
             lines.append(f"  learning: {self.learning.learning_signal}")
+        if self.status != "ok":
+            lines.append(f"  ERROR [{self.error_stage}]: {self.error}")
         return "\n".join(lines)
 
     def __repr__(self) -> str:
