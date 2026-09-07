@@ -15,6 +15,7 @@ from ..event import (
     OutcomeData, FeedbackData, LearningData,
 )
 from ..feedback import BasicFeedback
+from ..decision import BasicDecision
 
 if TYPE_CHECKING:
     from ..event import CortexEvent
@@ -117,28 +118,13 @@ class MockPrediction(PredictionModule):
 
 
 class MockDecision(DecisionModule):
-    """Basic decision: choose action based on perceived intent."""
+    """Phase 7 v1 decision: choose action based on perception + prediction."""
+
+    def __init__(self) -> None:
+        self._decision = BasicDecision()
 
     def process(self, event: CortexEvent) -> CortexEvent:
-        intent = event.perception.intent
-        action_map = {
-            "create": "code_edit",
-            "fix": "code_review",
-            "learn": "respond",
-            "optimize": "tool_call",
-            "deploy": "tool_call",
-        }
-        action_type = action_map.get(intent, "respond")
-        event.decide(DecisionData(
-            candidates=[
-                {"id": action_type, "score": 0.8},
-                {"id": "noop", "score": 0.2},
-            ],
-            selected_action=action_type,
-            decision_score=0.8,
-            decision_reason=f"intent={intent} → action={action_type}",
-        ))
-        return event
+        return self._decision.process(event)
 
 
 class MockAction(ActionModule):
