@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from ..interfaces import (
     PerceptionModule, RepresentationModule, AttentionModule,
     StateModule, MemoryModule, PredictionModule, DecisionModule,
-    ActionModule, FeedbackModule, LearningModule,
+    ActionModule, OutcomeProvider, FeedbackModule, LearningModule,
 )
 from ..event import (
     PerceptionData, RepresentationData, AttentionData, InternalState,
@@ -141,7 +141,7 @@ class MockDecision(DecisionModule):
 
 
 class MockAction(ActionModule):
-    """Basic action: plan, execute, and record outcome."""
+    """Basic action: execute and record action data only. Does NOT produce outcome."""
 
     def process(self, event: CortexEvent) -> CortexEvent:
         action_type = event.decision.selected_action
@@ -153,9 +153,28 @@ class MockAction(ActionModule):
             planned=True,
             actual=True,
         ))
+        return event
+
+
+class MockOutcomeProvider(OutcomeProvider):
+    """Default outcome provider: always reports success."""
+
+    def provide(self, event: CortexEvent) -> CortexEvent:
         event.record_outcome(OutcomeData(
-            actual_outcome=f"action '{action_type}' completed",
+            actual_outcome=f"action '{event.action.action_type}' completed",
             success=True,
+        ))
+        return event
+
+
+class FailingOutcomeProvider(OutcomeProvider):
+    """Outcome provider that always reports failure."""
+
+    def provide(self, event: CortexEvent) -> CortexEvent:
+        event.record_outcome(OutcomeData(
+            actual_outcome="outcome failed",
+            success=False,
+            error_message="simulated failure",
         ))
         return event
 
@@ -244,3 +263,8 @@ class FailingFeedback(MockFeedback):
 class FailingLearning(MockLearning):
     def process(self, event: CortexEvent) -> CortexEvent:
         raise RuntimeError("learning module failed")
+
+
+class FailingOutcomeProvider(OutcomeProvider):
+    def provide(self, event: CortexEvent) -> CortexEvent:
+        raise RuntimeError("outcome provider failed")

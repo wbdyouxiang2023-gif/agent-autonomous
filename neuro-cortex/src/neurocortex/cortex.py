@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from .interfaces import (
         PerceptionModule, RepresentationModule, AttentionModule,
         StateModule, MemoryModule, PredictionModule, DecisionModule,
-        ActionModule, FeedbackModule, LearningModule,
+        ActionModule, OutcomeProvider, FeedbackModule, LearningModule,
     )
 
 T = TypeVar("T", bound="CortexEvent")
@@ -29,7 +29,8 @@ class NeuroCortex:
     """
 
     # Ordered list of (stage_name, method_name) for _run_stages.
-    # ACTION module handles ACT + OUTCOME (record_outcome) internally.
+    # ACTION module handles ACT only — does NOT produce outcome.
+    # OUTCOME is provided by a separate injected OutcomeProvider.
     # FEEDBACK module handles compute_feedback separately.
     _STAGES = (
         ("PERCEPTION",   "perceive"),
@@ -40,6 +41,7 @@ class NeuroCortex:
         ("PREDICTION",   "predict"),
         ("DECISION",     "decide"),
         ("ACTION",       "act"),
+        ("OUTCOME",      "obtain_outcome"),
         ("FEEDBACK",     "compute_feedback"),
         ("LEARNING",     "learn"),
     )
@@ -54,6 +56,7 @@ class NeuroCortex:
         prediction: PredictionModule | None = None,
         decision: DecisionModule | None = None,
         action: ActionModule | None = None,
+        outcome_provider: OutcomeProvider | None = None,
         feedback: FeedbackModule | None = None,
         learning: LearningModule | None = None,
     ) -> None:
@@ -65,6 +68,7 @@ class NeuroCortex:
         self._prediction = prediction
         self._decision = decision
         self._action = action
+        self._outcome_provider = outcome_provider
         self._feedback = feedback
         self._learning = learning
 
@@ -117,10 +121,11 @@ class NeuroCortex:
         """Delegate action execution to the registered module."""
         return self._action.process(event) if self._action else event
 
-    def record_outcome(self, event: CortexEvent) -> CortexEvent:
-        """Delegate outcome recording — action module also handles outcome in Phase 2."""
-        if self._action:
-            return self._action.process(event)
+    def obtain_outcome(self, event: CortexEvent) -> CortexEvent:
+        """Obtain outcome from the injected OutcomeProvider."""
+        if self._outcome_provider:
+            return self._outcome_provider.provide(event)
+        # No provider: leave outcome empty, stage stays at ACTION
         return event
 
     def compute_feedback(self, event: CortexEvent) -> CortexEvent:
@@ -144,6 +149,7 @@ class NeuroCortex:
             ("PREDICTION",   self._prediction,   "predict"),
             ("DECISION",     self._decision,     "decide"),
             ("ACTION",       self._action,       "act"),
+            ("OUTCOME",      self._outcome_provider, "obtain_outcome"),
             ("FEEDBACK",     self._feedback,     "compute_feedback"),
             ("LEARNING",     self._learning,     "learn"),
         ]
@@ -176,3 +182,7 @@ class NeuroCortex:
     @property
     def action_module(self):
         return self._action
+
+    @property
+    def outcome_provider(self):
+        return self._outcome_provider

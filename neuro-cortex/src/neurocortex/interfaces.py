@@ -66,10 +66,23 @@ class DecisionModule(ABC):
 
 
 class ActionModule(ABC):
-    """Execute the selected action and record what happened."""
+    """Execute the selected action. Records action data but NOT the outcome."""
 
     @abstractmethod
     def process(self, event: CortexEvent) -> CortexEvent:
+        ...
+
+
+class OutcomeProvider(ABC):
+    """Provide the real/simulated outcome after an action has executed.
+
+    Outcome is a factual observation of what the world produced — distinct from
+    the Action's execution status. An action can succeed while the outcome fails
+    (e.g. code edits applied but tests still fail).
+    """
+
+    @abstractmethod
+    def provide(self, event: CortexEvent) -> CortexEvent:
         ...
 
 

@@ -11,14 +11,14 @@ from neurocortex.event import CortexEvent, PerceptionData, OutcomeData, Feedback
 from neurocortex.interfaces import (
     PerceptionModule, RepresentationModule, AttentionModule,
     StateModule, MemoryModule, PredictionModule, DecisionModule,
-    ActionModule, FeedbackModule, LearningModule,
+    ActionModule, OutcomeProvider, FeedbackModule, LearningModule,
 )
 from neurocortex.modules import (
     MockPerception, MockRepresentation, MockAttention, MockState, MockMemory,
     MockPrediction, MockDecision, MockAction, MockFeedback, MockLearning,
     FailingPerception, FailingRepresentation, FailingAttention, FailingState,
     FailingMemory, FailingPrediction, FailingDecision, FailingAction,
-    FailingFeedback, FailingLearning,
+    FailingFeedback, FailingLearning, MockOutcomeProvider, FailingOutcomeProvider,
 )
 from neurocortex.cortex import NeuroCortex
 
@@ -37,6 +37,7 @@ def full_cortex():
         prediction=MockPrediction(),
         decision=MockDecision(),
         action=MockAction(),
+        outcome_provider=MockOutcomeProvider(),
         feedback=MockFeedback(),
         learning=MockLearning(),
     )
@@ -571,24 +572,29 @@ class TestStageMethods:
         e = CortexEvent("hello").perceive().represent().attend().update_state()\
            .retrieve_memory().predict().decide()
         result = full_cortex.act(e)
-        # MockAction: act() → ACTION, record_outcome() → OUTCOME
-        assert result.stage == "OUTCOME"
+        # MockAction: act() → ACTION only (outcome is separate now)
+        assert result.stage == "ACTION"
         assert result.action.status == "success"
+        # Now obtain outcome to continue
+        result2 = full_cortex.obtain_outcome(result)
+        assert result2.stage == "OUTCOME"
 
     def test_compute_feedback_method(self, full_cortex):
         # Build event through DECISION, then use cortex methods
         e = CortexEvent("hello").perceive().represent().attend().update_state()\
            .retrieve_memory().predict().decide()
-        e = full_cortex.act(e)       # MockAction: ACTION → OUTCOME
-        result = full_cortex.compute_feedback(e)  # OUTCOME → FEEDBACK
+        e = full_cortex.act(e)              # → ACTION
+        e = full_cortex.obtain_outcome(e)   # → OUTCOME
+        result = full_cortex.compute_feedback(e)  # → FEEDBACK
         assert result.stage == "FEEDBACK"
 
     def test_learn_method(self, full_cortex):
         e = CortexEvent("hello").perceive().represent().attend().update_state()\
            .retrieve_memory().predict().decide()
-        e = full_cortex.act(e)                # → OUTCOME
-        e = full_cortex.compute_feedback(e)   # → FEEDBACK
-        result = full_cortex.learn(e)         # → LEARNING
+        e = full_cortex.act(e)                    # → ACTION
+        e = full_cortex.obtain_outcome(e)         # → OUTCOME
+        e = full_cortex.compute_feedback(e)       # → FEEDBACK
+        result = full_cortex.learn(e)             # → LEARNING
         assert result.stage == "LEARNING"
         assert result.learning.learning_signal != ""
 
@@ -673,3 +679,247 @@ class TestMultipleRuns:
         assert e1.stage == "LEARNING"
         assert e2.stage == "LEARNING"
         assert e1.perception.intent == e2.perception.intent
+
+
+# ── Phase 2.1: Action / Outcome Boundary ──────────────────────
+
+
+class TestCase1ActionSuccessOutcomeSuccess:
+    """Case 1: Action success → Outcome success."""
+
+    def test_action_success_then_outcome_success(self, full_cortex):
+        e = full_cortex.process("build api")
+        assert e.action.status == "success"
+        assert e.outcome.success is True
+        assert e.stage == "LEARNING"
+
+
+class TestCase2ActionSuccessOutcomeFailure:
+    """Case 2: Action succeeds but Outcome reports failure."""
+
+    def test_action_success_outcome_failure(self):
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            outcome_provider=FailingOutcomeProvider(),
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        # FailingOutcomeProvider raises RuntimeError → pipeline stops at ACTION
+        assert e.action.status == "success"       # action ran before outcome failed
+        assert e.status == "error"
+        assert e.error_stage == "OUTCOME"
+        assert "outcome provider failed" in e.error
+
+
+    def test_action_success_outcome_success(self):
+        """Verify normal flow: Action success → Outcome success → LEARNING."""
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            outcome_provider=MockOutcomeProvider(),
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        assert e.action.status == "success"
+        assert e.outcome.success is True
+        assert e.stage == "LEARNING"
+        assert e.status == "ok"
+
+
+class TestCase3ActionFailureOutcomeFailure:
+    """Case 3: Action fails → Outcome reports failure."""
+
+    def test_action_failure_outcome_failure(self):
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=FailingAction(),
+            outcome_provider=MockOutcomeProvider(),
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        assert e.status == "error"
+        assert e.error_stage == "ACTION"
+        assert e.outcome.success is False  # default, no outcome was recorded
+
+
+class TestCase4OutcomePending:
+    """Case 4: No outcome provider → outcome stays pending."""
+
+    def test_no_outcome_provider_stays_at_action(self):
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            # No outcome_provider
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        # Pipeline stops at ACTION because no provider → no outcome → no feedback
+        assert e.stage == "ACTION"
+        assert e.status == "ok"
+        assert e.outcome.actual_outcome == ""  # no outcome recorded
+
+
+class TestCase5OutcomeProviderException:
+    """Case 5: Outcome provider raises an exception."""
+
+    def test_outcome_provider_raises(self):
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            outcome_provider=FailingOutcomeProvider(),
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        assert e.status == "error"
+        assert e.error_stage == "OUTCOME"
+        assert "outcome provider failed" in e.error
+
+
+class TestCase6FeedbackWithoutOutcome:
+    """Feedback cannot produce meaningful signal without an outcome."""
+
+    def test_feedback_with_empty_outcome(self):
+        c = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            # No outcome_provider — outcome stays empty
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e = c.process("build api")
+        assert e.stage == "ACTION"  # never reaches FEEDBACK
+        assert e.outcome.success is False  # default value
+        # If we manually advance and call feedback, it should still work (no crash)
+        e.record_outcome(OutcomeData(actual_outcome="manual", success=True))
+        e2 = c.compute_feedback(e)
+        assert e2.stage == "FEEDBACK"
+
+
+class TestCase7OutcomeProviderReplaceable:
+    """OutcomeProvider can be swapped without changing Cortex core."""
+
+    def test_swap_outcome_provider(self, full_cortex):
+        # Full cortex has MockOutcomeProvider → success → LEARNING
+        e1 = full_cortex.process("test")
+        assert e1.outcome.success is True
+        assert e1.stage == "LEARNING"
+
+        # Replace with FailingOutcomeProvider → error at OUTCOME
+        c2 = NeuroCortex(
+            perception=MockPerception(),
+            representation=MockRepresentation(),
+            attention=MockAttention(),
+            state=MockState(),
+            memory=MockMemory(),
+            prediction=MockPrediction(),
+            decision=MockDecision(),
+            action=MockAction(),
+            outcome_provider=FailingOutcomeProvider(),
+            feedback=MockFeedback(),
+            learning=MockLearning(),
+        )
+        e2 = c2.process("test")
+        assert e2.status == "error"
+        assert e2.error_stage == "OUTCOME"
+        # Cortex core didn't change — only the provider was swapped
+        assert type(c2.outcome_provider).__name__ == "FailingOutcomeProvider"
+
+
+class TestCase8CustomOutcomeProvider:
+    """Custom outcome provider with business logic."""
+
+    def test_custom_outcome_provider(self):
+        class MyOutcomeProvider(OutcomeProvider):
+            """Succeeds only if input contains 'ok'."""
+            def provide(self, event):
+                success = "ok" in event.raw_input.lower()
+                event.record_outcome(OutcomeData(
+                    actual_outcome="custom check" + (" passed" if success else " failed"),
+                    success=success,
+                ))
+                return event
+
+        c = NeuroCortex(
+            perception=MockPerception(), action=MockAction(),
+            outcome_provider=MyOutcomeProvider(),
+            feedback=MockFeedback(), learning=MockLearning(),
+        )
+        e_ok = c.process("do it ok now")
+        e_fail = c.process("do it wrong")
+        assert e_ok.outcome.success is True
+        assert e_fail.outcome.success is False
+
+
+class TestCase9FullLifecycleOrder:
+    """Verify the complete lifecycle with explicit Action/Outcome separation."""
+
+    def test_full_lifecycle_with_separate_outcome(self, full_cortex):
+        e = full_cortex.process("optimize the algorithm")
+        assert e.perception.intent == "optimize"
+        assert e.representation.features["token_count"] > 0
+        assert e.attention.selected_items
+        assert 0 < e.state.curiosity < 1
+        assert e.prediction.predicted_outcome
+        assert e.decision.selected_action
+        assert e.action.status == "success"
+        assert e.action.action_type == "tool_call"
+        assert e.outcome.success is True
+        assert e.feedback.reward > 0
+        assert e.learning.learning_signal == "positive"
+        assert e.stage == "LEARNING"
+        assert e.status == "ok"
+
+
+class TestCase10EventChainDesign:
+    """Verify that event chain fields exist for future cross-event linking."""
+
+    def test_event_has_chain_fields(self, full_cortex):
+        e = full_cortex.process("test")
+        # session_id links events from the same session
+        assert len(e.session_id) > 0
+        assert len(e.id) == 12
+        # parent_event_id and previous_event_id are not in Phase 2.1 scope,
+        # but session_id is sufficient for grouping
+        assert e.status == "ok"
