@@ -52,6 +52,7 @@ class PerceptionData:
     risk: float = 0.0  # 0.0–1.0
     entities: list[str] = field(default_factory=list)
     confidence: float = 0.5  # 0.0–1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PerceptionData:
