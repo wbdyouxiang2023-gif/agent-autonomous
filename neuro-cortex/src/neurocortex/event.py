@@ -204,6 +204,96 @@ class LearningData:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
+@dataclass
+class Experience:
+    """Structured record of a past event for future reuse.
+
+    Experience captures what happened, what was predicted, what actually
+    occurred, and how wrong the prediction was. This enables behavioral
+    adaptation through experience retrieval.
+    """
+    experience_id: str = ""
+    timestamp: str = ""
+    source_event_id: str = ""
+    raw_input: str = ""
+    intent: str = ""
+    action_type: str = ""
+    predicted_outcome: str = ""
+    predicted_prob: float = 0.5
+    actual_outcome: str = ""
+    success: bool = False
+    prediction_error: float = 0.0
+    evaluation: str = ""
+    confidence: float = 0.5
+    uncertainty: float = 0.2
+    context_tags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON storage."""
+        return {
+            "experience_id": self.experience_id,
+            "timestamp": self.timestamp,
+            "source_event_id": self.source_event_id,
+            "raw_input": self.raw_input,
+            "intent": self.intent,
+            "action_type": self.action_type,
+            "predicted_outcome": self.predicted_outcome,
+            "predicted_prob": self.predicted_prob,
+            "actual_outcome": self.actual_outcome,
+            "success": self.success,
+            "prediction_error": self.prediction_error,
+            "evaluation": self.evaluation,
+            "confidence": self.confidence,
+            "uncertainty": self.uncertainty,
+            "context_tags": self.context_tags,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Experience:
+        """Deserialize from dict, handling missing fields gracefully."""
+        allowed = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        return cls(**filtered)
+
+    @classmethod
+    def from_event(cls, event: "CortexEvent") -> Experience:
+        """Create Experience from a completed CortexEvent."""
+        import uuid as _uuid
+        return cls(
+            experience_id=str(_uuid.uuid4()),
+            timestamp=event.timestamp,
+            source_event_id=event.id,
+            raw_input=event.raw_input,
+            intent=event.perception.intent,
+            action_type=event.action.action_type,
+            predicted_outcome=event.prediction.predicted_outcome,
+            predicted_prob=event.prediction.success_probability,
+            actual_outcome=event.outcome.actual_outcome,
+            success=event.outcome.success,
+            prediction_error=event.feedback.prediction_error,
+            evaluation=event.feedback.evaluation,
+            confidence=event.prediction.prediction_confidence,
+            uncertainty=event.state.uncertainty,
+            context_tags=_extract_context_tags(event),
+        )
+
+
+def _extract_context_tags(event: CortexEvent) -> list[str]:
+    """Extract meaningful tags from event for retrieval."""
+    tags = []
+    if event.perception.intent:
+        tags.append(f"intent:{event.perception.intent}")
+    if event.action.action_type:
+        tags.append(f"action:{event.action.action_type}")
+    if event.outcome.success:
+        tags.append("outcome:success")
+    else:
+        tags.append("outcome:failure")
+    if event.feedback.evaluation:
+        tags.append(f"eval:{event.feedback.evaluation}")
+    return tags
+
+
 # ── Core Event ─────────────────────────────────────────────────
 
 
