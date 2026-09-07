@@ -144,9 +144,38 @@ class TestStageTransitions:
         assert e.outcome.success is True
         assert e.feedback.reward == 1.0
 
+    def test_record_outcome_advances_stage(self):
+        e = CortexEvent("x").perceive().represent().attend().update_state()\
+           .retrieve_memory().predict().decide().act()
+        e.record_outcome(OutcomeData(actual_outcome="file saved", success=True))
+        assert e.stage == "OUTCOME"
+        assert e.outcome.actual_outcome == "file saved"
+
+    def test_compute_feedback_advances_stage(self):
+        e = CortexEvent("x").perceive().represent().attend().update_state()\
+           .retrieve_memory().predict().decide().act()\
+           .record_outcome(OutcomeData(success=True))
+        e.compute_feedback(FeedbackData(reward=1.0, prediction_error=0.1))
+        assert e.stage == "FEEDBACK"
+        assert e.feedback.reward == 1.0
+
+    def test_outcome_and_feedback_are_separate(self):
+        """Outcome and Feedback occupy distinct stages with independent data."""
+        e = CortexEvent("x").perceive().represent().attend().update_state()\
+           .retrieve_memory().predict().decide().act()
+        e.record_outcome(OutcomeData(actual_outcome="crash", success=False))
+        assert e.stage == "OUTCOME"
+        assert e.outcome.success is False
+        assert e.feedback.reward == 0.0  # not yet computed
+        e.compute_feedback(FeedbackData(reward=-1.0))
+        assert e.stage == "FEEDBACK"
+        assert e.feedback.reward == -1.0
+
     def test_learn_advances_stage(self):
         e = CortexEvent("x").perceive().represent().attend().update_state()\
-           .retrieve_memory().predict().decide().act().evaluate()
+           .retrieve_memory().predict().decide().act()\
+           .record_outcome(OutcomeData(actual_outcome="done", success=True))\
+           .compute_feedback(FeedbackData(reward=1.0))
         e.learn(LearningData(learning_signal="positive", state_updates={"confidence": 0.7}))
         assert e.stage == "LEARNING"
         assert e.learning.learning_signal == "positive"
@@ -347,7 +376,9 @@ class TestSummary:
 
     def test_summary_after_learning(self):
         e = CortexEvent("x").perceive().represent().attend().update_state()\
-           .retrieve_memory().predict().decide().act().evaluate()\
+           .retrieve_memory().predict().decide().act()\
+           .record_outcome(OutcomeData(success=True))\
+           .compute_feedback(FeedbackData(reward=0.5))\
            .learn(LearningData(learning_signal="improved"))
         s = e.summary()
         assert "improved" in s

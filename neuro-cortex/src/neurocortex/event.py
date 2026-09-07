@@ -86,7 +86,14 @@ class AttentionData:
 
 @dataclass
 class InternalState:
-    """Dynamic internal state — evolves with every event."""
+    """
+    Dynamic internal state — evolves with every event.
+
+    NOTE: Values are clamped to [0, 1] for this MVP implementation.
+    This is a practical constraint, not a theoretical limit.
+    Future versions may allow different ranges per state dimension
+    (e.g. negativity for valence, unbounded for drive).
+    """
     curiosity: float = 0.5
     caution: float = 0.3
     confidence: float = 0.5
@@ -203,26 +210,26 @@ class CortexEvent:
     """
     Unified data structure flowing through the full cognitive lifecycle.
 
-    Lifecycle filling order:
-      1. create(raw_input, source, session_id)   → stage=INPUT
-      2. perception.update(...)                  → stage=PERCEPTION
-      3. representation.update(...)              → stage=REPRESENTATION
-      4. attention.update(...)                   → stage=ATTENTION
-      5. state.update(...)                       → stage=STATE
-      6. memory.update(...)                      → stage=MEMORY
-      7. prediction.update(...)                  → stage=PREDICTION
-      8. decision.update(...)                    → stage=DECISION
-      9. action.update(...)                      → stage=ACTION
-      10. outcome.update(...)                    → stage=OUTCOME
-      11. feedback.update(...)                   → stage=FEEDBACK
-      12. learning.update(...)                   → stage=LEARNING
+    Standard lifecycle (strict linear progression via advance_to):
+      INPUT → PERCEPTION → REPRESENTATION → ATTENTION → STATE
+      → MEMORY → PREDICTION → DECISION → ACTION → OUTCOME → FEEDBACK → LEARNING
+
+    Non-linear information flows are allowed at the module level (Phase 2+):
+      - Memory can feed directly into Prediction or Attention
+      - Feedback can update Internal State or Memory
+      - Prediction can feed back into Decision without re-predicting
+
+    Each stage has typed nested dataclasses to enforce data contracts:
+      PerceptionData, RepresentationData, AttentionData, InternalState,
+      MemoryData, PredictionData, DecisionData, ActionData,
+      OutcomeData, FeedbackData, LearningData
     """
 
     # Valid stage progression
     STAGE_ORDER = (
         "INPUT", "PERCEPTION", "REPRESENTATION", "ATTENTION",
         "STATE", "MEMORY", "PREDICTION", "DECISION",
-        "ACTION", "FEEDBACK", "LEARNING",
+        "ACTION", "OUTCOME", "FEEDBACK", "LEARNING",
     )
 
     def __init__(
@@ -347,17 +354,41 @@ class CortexEvent:
 
     def evaluate(self, data: OutcomeData | dict[str, Any] | None = None,
                  feedback: FeedbackData | dict[str, Any] | None = None) -> CortexEvent:
-        """Update outcome and feedback, advance to FEEDBACK stage."""
+        """Record outcome and compute feedback in one call (convenience method)."""
         if isinstance(data, dict):
             data = OutcomeData.from_dict(data)
         if isinstance(feedback, dict):
             feedback = FeedbackData.from_dict(feedback)
-        if self.stage == "ACTION":
-            self.advance_to("FEEDBACK")
+        if data is not None:
+            self.record_outcome(data)
+        if feedback is not None:
+            self.compute_feedback(feedback)
+        return self
+
+    def record_outcome(self, data: OutcomeData | dict[str, Any] | None = None) -> CortexEvent:
+        """
+        Record what actually happened in the real world.
+        Outcome is a factual observation, not a system evaluation.
+        """
+        if isinstance(data, dict):
+            data = OutcomeData.from_dict(data)
         if data is not None:
             self.outcome = data
-        if feedback is not None:
-            self.feedback = feedback
+        if self.stage == "ACTION":
+            self.advance_to("OUTCOME")
+        return self
+
+    def compute_feedback(self, data: FeedbackData | dict[str, Any] | None = None) -> CortexEvent:
+        """
+        Compute the system's evaluation signal by comparing prediction against outcome.
+        Feedback is derived, not directly observed — it is the bridge to learning.
+        """
+        if isinstance(data, dict):
+            data = FeedbackData.from_dict(data)
+        if data is not None:
+            self.feedback = data
+        if self.stage == "OUTCOME":
+            self.advance_to("FEEDBACK")
         return self
 
     def learn(self, data: LearningData | dict[str, Any] | None = None) -> CortexEvent:
