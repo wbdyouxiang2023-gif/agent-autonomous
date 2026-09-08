@@ -28,6 +28,13 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import time
 
+# ── Action Learning (Level 3.5-C) — OFF by default ────────────────────
+# NEUROCORTEX_ACTION_LEARNING=false → bridge is a no-op passthrough.
+from neurocortex.action_learning import ActionLearningBridge
+ACTION_LEARNING_ENABLED = os.environ.get("NEUROCORTEX_ACTION_LEARNING", "false").strip().lower() in ("1", "true", "yes", "on")
+ACTION_LEARNING_SHADOW = os.environ.get("ACTION_LEARNING_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
+action_bridge = ActionLearningBridge()
+
 PORT = 9100
 STORE_PATH = os.path.expanduser("~/.neurocortex_memory.jsonl")
 
@@ -127,6 +134,19 @@ cortex = NeuroCortex(
     outcome_provider=PersistentOutcome(store),
     feedback=MockFeedback(), learning=learner,
 )
+
+# ── Action Learning hook (Level 3.5-C) — no-op unless enabled ─────────
+_original_process = cortex.process
+
+def _process_with_action_learning(raw_input):
+    event = _original_process(raw_input)
+    if ACTION_LEARNING_ENABLED:
+        action_bridge.record_event_outcome(event)
+    return event
+
+cortex.process = _process_with_action_learning
+
+print(f"Action Learning: {'ENABLED' if ACTION_LEARNING_ENABLED else 'OFF'} (shadow={ACTION_LEARNING_SHADOW})")
 print(f"Loaded {store.count()} experiences. Ready on port {PORT}.")
 
 
