@@ -12,6 +12,10 @@ from .schema import (
 )
 from .bridge import ActionLearningBridge
 from .outcome_adapter import OutcomeAdapter, ExecutionResult
+from .similarity import similarity, SimilarityResult
+from .semantic_transfer import (
+    BorrowedEvidence, transfer_gate, compute_transfer_weight, build_borrowed_evidence,
+)
 
 __all__ = [
     "ActionLearningConfig",
@@ -23,4 +27,10 @@ __all__ = [
     "ActionLearningBridge",
     "OutcomeAdapter",
     "ExecutionResult",
+    "similarity",
+    "SimilarityResult",
+    "BorrowedEvidence",
+    "transfer_gate",
+    "compute_transfer_weight",
+    "build_borrowed_evidence",
 ]

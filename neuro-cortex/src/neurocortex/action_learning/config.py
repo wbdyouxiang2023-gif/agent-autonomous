@@ -112,6 +112,19 @@ class ActionLearningConfig:
         default_factory=lambda: _env_int("ACTION_SITUATION_EVIDENCE_THRESHOLD", 2)
     )
 
+    # ── Semantic transfer (Level 5.1) — OFF by default ──────────
+    # Borrowed evidence never touches StatisticsStore; it only influences
+    # candidate ranking when enabled.
+    semantic_transfer_enabled: bool = field(
+        default_factory=lambda: _env_bool("SEMANTIC_TRANSFER_ENABLED", False)
+    )
+    semantic_high_threshold: float = field(
+        default_factory=lambda: _env_float("SEMANTIC_TRANSFER_HIGH", 0.70)
+    )
+    semantic_low_threshold: float = field(
+        default_factory=lambda: _env_float("SEMANTIC_TRANSFER_LOW", 0.60)
+    )
+
     @property
     def active(self) -> bool:
         return self.enabled

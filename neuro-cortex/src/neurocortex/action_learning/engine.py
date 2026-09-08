@@ -194,8 +194,15 @@ class ActionLearningEngine:
         situation: ActionLearningSituation,
         candidates: list[ActionLearningCandidate | str],
         experiences: list["Experience"] | None = None,
+        known_situations: list["ActionLearningSituation"] | None = None,
     ) -> list[dict[str, Any]]:
-        """Evaluate each candidate for a situation (situation-aware)."""
+        """Evaluate each candidate for a situation (situation-aware).
+
+        ``known_situations`` (optional): list of KNOWN situations with
+        real raw text + persisted statistics. Used ONLY for semantic
+        evidence transfer (Level 5.1). Borrowed evidence never modifies
+        StatisticsStore.
+        """
         cands = [self._coerce_candidate(c) for c in candidates]
         if not cands:
             return []
@@ -216,12 +223,37 @@ class ActionLearningEngine:
             if specific is not None and specific_support >= threshold:
                 stats = specific
                 match_level = 1
-            elif global_stats is not None:
-                stats = global_stats
-                match_level = 3
             else:
                 stats = None
                 match_level = None
+
+            # ── Semantic transfer (Level 5.1) — OFF by default ──
+            # When NO exact evidence exists, borrow from the most similar
+            # KNOWN situation (raw-text similarity). Semantic transfer
+            # takes precedence over bare global fallback: similar-situated
+            # evidence is more targeted than any-situation evidence.
+            borrowed = None
+            if (
+                self._config.semantic_transfer_enabled
+                and stats is None
+                and known_situations
+            ):
+                borrowed = self._borrow_evidence(situation, cand, known_situations)
+
+            if borrowed is not None:
+                stats = {
+                    "success_count": borrowed.original_success,
+                    "failure_count": borrowed.original_support - borrowed.original_success,
+                    "total_count": borrowed.original_support,
+                    "last_seen": "",
+                    "updated_at": "",
+                }
+                match_level = 4  # semantic (derived) — below exact, above global
+            elif stats is None:
+                global_stats = self._store.get_global_for(cand.action_key)
+                if global_stats is not None:
+                    stats = global_stats
+                    match_level = 3
 
             hist = self._history_evidence(stats) if stats else self._empty_history()
 
@@ -261,6 +293,7 @@ class ActionLearningEngine:
                 "recency_bonus": round(recency, 4),
                 "match_level": match_level if match_level is not None else sem_level,
                 "evidence_status": evidence_status,
+                "borrowed_from": borrowed.borrowed_from if borrowed is not None else None,
                 "situation_key": sit_key,
                 "original_index": idx,
             })
@@ -272,8 +305,9 @@ class ActionLearningEngine:
         situation: ActionLearningSituation,
         candidate_actions: list[ActionLearningCandidate | str],
         experiences: list["Experience"] | None = None,
+        known_situations: list["ActionLearningSituation"] | None = None,
     ) -> list[dict[str, Any]]:
-        return self.evaluate_candidates(situation, candidate_actions, experiences)
+        return self.evaluate_candidates(situation, candidate_actions, experiences, known_situations=known_situations)
 
     def record_outcome(
         self,
@@ -315,6 +349,51 @@ class ActionLearningEngine:
         return "\n".join(lines)
 
     # ── internals ──────────────────────────────────────────────
+
+    def _borrow_evidence(self, situation: ActionLearningSituation,
+                         cand: ActionLearningCandidate,
+                         known_situations: list["ActionLearningSituation"]):
+        """Borrow evidence from the most similar KNOWN situation.
+
+        Returns BorrowedEvidence | None. Only called when the query
+        situation has NO exact/global evidence for this action. Never
+        writes to StatisticsStore. Similarity is computed on RAW TEXT
+        (the honest signal); source statistics come from the store.
+        """
+        from .semantic_transfer import build_borrowed_evidence
+
+        query_raw = situation.raw_input or situation.intent or ""
+        if not query_raw:
+            return None
+
+        best = None
+        best_sim = 0.0
+        for known in known_situations:
+            if not (known.raw_input or known.intent):
+                continue
+            known_key = situation_key(known)
+            src_stats = self._store.get_for(known_key, cand.action_key)
+            if src_stats is None:
+                continue
+            src_success = int(src_stats.get("success_count", 0))
+            src_failure = int(src_stats.get("failure_count", 0))
+            if src_success + src_failure == 0:
+                continue
+            ev, gate, sim_result = build_borrowed_evidence(
+                query_raw,
+                source_situation_key=f"{known_key}|action:{cand.action_key}",
+                source_raw=known.raw_input or known.intent,
+                source_action=cand.action_key,
+                source_success=src_success,
+                source_failure=src_failure,
+                high=self._config.semantic_high_threshold,
+                low=self._config.semantic_low_threshold,
+            )
+            if ev is not None and sim_result.score > best_sim:
+                best = ev
+                best_sim = sim_result.score
+
+        return best
 
     @staticmethod
     def _coerce_candidate(c: ActionLearningCandidate | str) -> ActionLearningCandidate:
