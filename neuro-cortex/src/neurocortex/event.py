@@ -167,14 +167,17 @@ class ActionData:
 
 @dataclass
 class OutcomeData:
-    """What actually happened after the action."""
+    """What actually happened after the action.
+    
+    Level 4.0: Added task_completed and completion_source for real task
+    completion tracking. These are separate from execution_success.
+    """
     actual_outcome: str = ""
     success: bool = False
     error_message: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> OutcomeData:
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+    # Level 4.0: Real task completion signal
+    task_completed: bool | None = None  # None = unknown, not False
+    completion_source: str = "unknown"  # provenance: "environment", "user_feedback", "task_verifier", "unknown"
 
 
 @dataclass
