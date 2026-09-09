@@ -43,7 +43,24 @@ NO_EVIDENCE = None
 
 
 def situation_key(situation: ActionLearningSituation) -> str:
-    """Build the situation identity used in statistics keys (phase 1: intent)."""
+    """Build the canonical situation family key for learning statistics.
+
+    Uses canonical_situation_family (from V4 classifier) to enable
+    cross-type generalization. e.g., code_locator and code_search
+    both map to CODE_LOCATION family.
+
+    When task_type is not set (legacy situations), falls back to intent-based key.
+    """
+    # Import here to avoid circular dependency
+    try:
+        from neurocortex.perception.classifier_v4 import get_canonical_family
+        task_type = (situation.task_type or "").strip().lower()
+        if task_type:
+            family = get_canonical_family(task_type)
+            return f"family:{family}" if family and family != "UNKNOWN" else "family:__unknown__"
+    except ImportError:
+        pass
+    # Fallback to intent-based key (legacy behavior)
     intent = (situation.intent or "").strip().lower()
     return f"intent:{intent}" if intent else "intent:__none__"
 
@@ -326,7 +343,7 @@ class ActionLearningEngine:
                 "evidence_scope": "local" if match_level == 1 else "global" if match_level == 3 else "unknown",
             })
 
-        return self._sort_ranked(evaluated)
+        return self._sort_ranked(evaluated, prior=self._config.prior_rate)
 
     def rank_actions(
         self,
@@ -347,6 +364,9 @@ class ActionLearningEngine:
 
         Only success=True / success=False update. UNKNOWN (None) is ignored.
         Task completion is recorded if available (NEW Level 4.0).
+
+        NC-09 FINAL: When execution succeeds but task is NOT completed,
+        treat as failure for learning purposes (partial failure = ineffective action).
         """
         if not self._config.enabled:
             return False
@@ -355,9 +375,16 @@ class ActionLearningEngine:
         cand = self._coerce_candidate(action)
         if not cand.action_key:
             return False
+
+        # NC-09 FINAL: Derive effective success from execution + task completion
+        # If execution succeeded but task was NOT completed, treat as failure
+        effective_success = bool(outcome.success)
+        if effective_success and outcome.task_completion is False:
+            effective_success = False
+
         sit_key = situation_key(situation)
         self._store.record(
-            sit_key, cand.action_key, bool(outcome.success), outcome.observed_at,
+            sit_key, cand.action_key, effective_success, outcome.observed_at,
             task_completion=outcome.task_completion,  # NEW
         )
         self._store.save()
@@ -436,14 +463,18 @@ class ActionLearningEngine:
     def _empty_history(self) -> dict[str, Any]:
         return {
             "history_score": NO_EVIDENCE,
-            "confidence": NO_EVIDENCE,
+            "confidence": 0.0,
             "support_count": 0,
             "success_count": 0,
             "failure_count": 0,
-            "task_completion_count": 0,  # NEW
-            "task_incompletion_count": 0,  # NEW
+            "task_completion_count": 0,
+            "task_incompletion_count": 0,
+            "task_completion_rate": None,
+            "task_confidence": 0.0,
             "match_level": None,
         }
+
+
 
     def _history_evidence(self, stats: dict[str, Any]) -> dict[str, Any]:
         success = int(stats.get("success_count", 0))
@@ -468,6 +499,18 @@ class ActionLearningEngine:
         else:
             task_completion_rate = None  # Unknown
             task_confidence = 0.0
+
+        # NC-09 FINAL: Incorporate task completion into effective score.
+        # When execution succeeds but task is NOT completed, treat as partial failure.
+        # This ensures task completion acts as a proper learning signal.
+        if task_support > 0:
+            # Weight task completion heavily when we have evidence
+            # This prevents "success but failed task" from reinforcing bad actions
+            completion_weight = 0.7  # 70% weight on task completion when known
+            hist_score = hist_score * (1.0 - completion_weight) + task_completion_rate * completion_weight
+            # Ensure failed tasks score below prior (0.5) to allow unknown actions to compete
+            if task_completion_rate < 0.5:
+                hist_score = min(hist_score, self._config.prior_rate * 0.8)
 
         return {
             "history_score": round(hist_score, 4),
@@ -560,18 +603,31 @@ class ActionLearningEngine:
         return 0.5 ** (age / half_life)
 
     @staticmethod
-    def _sort_ranked(evaluated: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sort_ranked(evaluated: list[dict[str, Any]], prior: float = 0.5) -> list[dict[str, Any]]:
         """Sort by adjusted_score (primary), then support_count (tie-breaker).
-        
+
         FIXED: Previously prioritized -level over score, which incorrectly
         forced L1 above L3 regardless of actual adjusted scores.
-        
+
         The adjusted_score already incorporates match_level_penalty,
         so sorting by score is sufficient.
+
+        NC-09 FINAL: When an action has only failures (success_count=0) and
+        another action has no evidence, the no-evidence action gets the prior
+        score instead of -1.0. This allows failed actions to lose to untested
+        alternatives while preserving evidence-based ranking for successful actions.
         """
+        # Check if any action has pure failure evidence (success_count=0, failure_count>0)
+        has_pure_failure = any(
+            r.get("success_count", 0) == 0 and r.get("failure_count", 0) > 0
+            for r in evaluated
+        )
+
         def key_fn(r: dict[str, Any]) -> tuple:
-            score = r["score"] if r["score"] is not None else -1.0
-            support = r["support_count"]
-            return (score, support)
-        
+            if r["score"] is not None:
+                return (r["score"], r["support_count"])
+            # No evidence: use prior only when there's a pure failure in the pool
+            score = prior if has_pure_failure else -1.0
+            return (score, r["support_count"])
+
         return sorted(evaluated, key=key_fn, reverse=True)

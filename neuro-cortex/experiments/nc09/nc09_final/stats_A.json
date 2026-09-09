@@ -1,0 +1,11 @@
+{
+  "family:CODE_LOCATION|action:search_files": {
+    "success_count": 1,
+    "failure_count": 0,
+    "task_completion_count": 1,
+    "task_incompletion_count": 0,
+    "total_count": 1,
+    "last_seen": "2026-09-09T14:16:04.712775+00:00",
+    "updated_at": "2026-09-09T14:16:04.712775+00:00"
+  }
+}
