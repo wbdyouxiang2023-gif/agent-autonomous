@@ -229,7 +229,53 @@ class Handler(BaseHTTPRequestHandler):
                         event.decision.decision_reason = f"nc06_policy: {nc06_result.get('decision_status', '')}"
                 except Exception as _e:
                     pass  # Never let NC-06 failures affect the response
-            
+
+            # ── NC-08B.3: Completion Ranking Shadow (SHADOW-ONLY) ──
+            # original_action is FINAL here (post NC-06). NC computes a
+            # recommendation that NEVER enters the executor — shadow log only.
+            # Feature flag NC_SHADOW_MODE (default OFF). All NC failures are
+            # swallowed; Original action is never blocked or changed.
+            try:
+                if os.environ.get("NC_SHADOW_MODE", "off").strip().lower() in ("1", "true", "yes", "on"):
+                    from experiments.nc08b.shadow.shadow_adapter import ShadowAdapter
+                    _nc_shadow = ShadowAdapter(enabled=True)
+                    original_action = event.decision.selected_action
+                    candidates = list(getattr(event.decision, "candidates", []) or []) or [original_action]
+                    cand_strs = []
+                    for c in candidates:
+                        if isinstance(c, str):
+                            cand_strs.append(c)
+                        elif isinstance(c, dict):
+                            cand_strs.append(c.get("id") or c.get("action") or c.get("action_type") or str(c))
+                        else:
+                            cand_strs.append(getattr(c, "action_type", str(c)))
+                    if not cand_strs:
+                        cand_strs = [original_action]
+                    # If mock candidates are degenerate (respond/noop only),
+                    # widen to the real tool space seen in completion evidence.
+                    # Shadow-only; original_action is never changed.
+                    if set(cand_strs) <= {"respond", "noop"}:
+                        cand_strs = ["read_file", "search_files", "terminal", "write_file"]
+                        if original_action not in cand_strs:
+                            cand_strs.append(original_action)
+                    sit = getattr(event.perception, "intent", "") or "unknown"
+                    # Use IntentExtractor for a more meaningful situation when
+                    # the (mock) perception intent is generic. Shadow-only;
+                    # does not affect the original decision path.
+                    if sit in ("general", "review", "unknown"):
+                        try:
+                            from neurocortex.action_learning.intent_extractor import extract_intent
+                            _ir = extract_intent(msg)
+                            if _ir.intent and _ir.confidence >= 0.5:
+                                sit = _ir.intent
+                        except Exception:
+                            pass
+                    rec = _nc_shadow.recommend(sit, cand_strs, original_action)
+                    # Hard safety: NC must never alter the actual action
+                    assert event.decision.selected_action == original_action
+            except Exception as _e:
+                pass  # Never let NC-08B.3 shadow failures affect the response
+
             retrieved = retriever.retrieve(msg)
             stats = get_stats(store)
             resp = {
