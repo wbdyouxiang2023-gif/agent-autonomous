@@ -13,6 +13,8 @@
 """
 import sys, os, json, hashlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'experiment'))
+from observation_logger import log_observation
 
 from neurocortex.cortex import NeuroCortex
 from neurocortex.modules import MockPerception, MockRepresentation, MockAttention, MockState, MockMemory, MockDecision, MockAction, MockFeedback
@@ -34,6 +36,14 @@ from neurocortex.action_learning import ActionLearningBridge
 ACTION_LEARNING_ENABLED = os.environ.get("NEUROCORTEX_ACTION_LEARNING", "false").strip().lower() in ("1", "true", "yes", "on")
 ACTION_LEARNING_SHADOW = os.environ.get("ACTION_LEARNING_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
 action_bridge = ActionLearningBridge()
+
+# ── Phase R5: Shadow Learning Observer with PolicyEngine ───────────────
+# Observes decisions without changing behavior. Records shadow policy.
+# PolicyEngine runs in shadow mode: computes decisions but never affects production.
+POLICY_ENABLED = os.environ.get("NEUROCORTEX_POLICY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+POLICY_SHADOW_ONLY = os.environ.get("NEUROCORTEX_POLICY_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
+from shadow_observer import get_shadow_observer
+shadow_observer = get_shadow_observer(policy_enabled=POLICY_ENABLED)
 
 PORT = 9100
 STORE_PATH = os.path.expanduser("~/.neurocortex_memory.jsonl")
@@ -146,7 +156,7 @@ def _process_with_action_learning(raw_input):
 
 cortex.process = _process_with_action_learning
 
-print(f"Action Learning: {'ENABLED' if ACTION_LEARNING_ENABLED else 'OFF'} (shadow={ACTION_LEARNING_SHADOW})")
+print(f"Action Learning: {'ENABLED' if ACTION_LEARNING_ENABLED else 'OFF'} (shadow={ACTION_LEARNING_SHADOW}, policy={POLICY_ENABLED})")
 print(f"Loaded {store.count()} experiences. Ready on port {PORT}.")
 
 
@@ -175,6 +185,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "empty message"}, 400)
                 return
             event = cortex.process(msg)
+            # Observation logging (append-only, zero behavioral change)
+            try:
+                log_observation(event, msg)
+            except Exception as _e:
+                pass  # Never let logging failures affect the response
+            
+            # Phase R4: Shadow learning observation (append-only, zero behavioral change)
+            try:
+                shadow_result = shadow_observer.observe_decision(event, msg)
+            except Exception as _e:
+                pass  # Never let shadow observation failures affect the response
+            
             retrieved = retriever.retrieve(msg)
             stats = get_stats(store)
             resp = {
