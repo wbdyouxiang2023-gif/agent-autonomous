@@ -179,6 +179,16 @@ class OutcomeData:
     task_completed: bool | None = None  # None = unknown, not False
     completion_source: str = "unknown"  # provenance: "environment", "user_feedback", "task_verifier", "unknown"
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OutcomeData:
+        """Restore OutcomeData from a dict (aligns with sibling Data classes).
+
+        Missing task_completed stays None (unknown); missing
+        completion_source stays "unknown". Never infers task_completed
+        from success.
+        """
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
 
 @dataclass
 class FeedbackData:
