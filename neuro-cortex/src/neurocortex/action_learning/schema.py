@@ -94,13 +94,25 @@ def situation_from_event(event: "CortexEvent") -> ActionLearningSituation:
     perception = getattr(event, "perception", None)
     intent = getattr(perception, "intent", "") if perception is not None else ""
     raw_input = getattr(event, "raw_input", "")
+
+    # NC-09: Try to get task_type from V4 classifier for better situation keys
+    task_type = None
+    try:
+        from neurocortex.perception.classifier_v4 import classify_v4
+        cls = classify_v4(raw_input or intent)
+        if cls.task_type and cls.confidence >= 0.5:
+            task_type = cls.task_type
+            intent = task_type  # Update intent to match task_type
+    except ImportError:
+        pass
+
     return ActionLearningSituation(
         intent=intent,
-        task_type=None,
+        task_type=task_type,
         error_type=None,
         context_features={},
         raw_input=raw_input,
-        situation_completeness="partial",
+        situation_completeness="full" if task_type else "partial",
     )
 
 

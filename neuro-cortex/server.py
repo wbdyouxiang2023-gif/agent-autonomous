@@ -25,17 +25,30 @@ from neurocortex.memory.experience_store import ExperienceStore
 from neurocortex.memory.experience_retriever import ExperienceRetriever
 from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
 from neurocortex.interfaces import OutcomeProvider
-from neurocortex.event import OutcomeData
+from neurocortex.event import OutcomeData, Experience
+from neurocortex.perception.intent_router import detect_coarse_intent
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import time
 
-# ── Action Learning (Level 3.5-C) — OFF by default ────────────────────
+# ── Action Learning (Level 3.5-C / NC-09) — OFF by default ────────────
 # NEUROCORTEX_ACTION_LEARNING=false → bridge is a no-op passthrough.
 from neurocortex.action_learning import ActionLearningBridge
+from neurocortex.action_learning.config import ActionLearningConfig
 ACTION_LEARNING_ENABLED = os.environ.get("NEUROCORTEX_ACTION_LEARNING", "false").strip().lower() in ("1", "true", "yes", "on")
 ACTION_LEARNING_SHADOW = os.environ.get("ACTION_LEARNING_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
-action_bridge = ActionLearningBridge()
+ACTION_LEARNING_THRESHOLD = int(os.environ.get("ACTION_SITUATION_EVIDENCE_THRESHOLD", "1"))
+
+# NC-09: Initialize bridge with proper config when enabled
+if ACTION_LEARNING_ENABLED:
+    _al_config = ActionLearningConfig(
+        enabled=True,
+        shadow_only=ACTION_LEARNING_SHADOW,
+        situation_evidence_threshold=ACTION_LEARNING_THRESHOLD,
+    )
+    action_bridge = ActionLearningBridge(config=_al_config)
+else:
+    action_bridge = ActionLearningBridge()
 
 # ── Phase R5/NC-05B: Shadow Learning Observer with Multi-Action Support ──
 # Observes decisions without changing behavior. Records shadow policy.
@@ -66,22 +79,7 @@ STORE_PATH = os.path.expanduser("~/.neurocortex_memory.jsonl")
 
 class BilingualPerception(MockPerception):
     def _detect_intent(self, text):
-        t = text.lower()
-        if any(k in t for k in ("what", "how", "explain", "介绍", "解释", "说明", "是什么", "为什么", "了解", "知道")):
-            return "explain"
-        if any(k in t for k in ("do", "make", "build", "create", "write", "帮我", "做", "写", "建", "创建", "生成", "实现", "开发")):
-            return "create"
-        if any(k in t for k in ("fix", "debug", "bug", "错误", "问题", "故障", "修", "调", "解决", "修复")):
-            return "fix"
-        if any(k in t for k in ("analyze", "check", "review", "look", "看", "检查", "分析", "审查", "看看")):
-            return "review"
-        if any(k in t for k in ("deploy", "run", "start", "部署", "运行", "启动", "上线", "发布")):
-            return "deploy"
-        if any(k in t for k in ("optimize", "improve", "fast", "快", "优化", "加速", "性能", "提升")):
-            return "optimize"
-        if any(k in t for k in ("test", "测试", "用例", "验证")):
-            return "test"
-        return "general"
+        return detect_coarse_intent(text)
 
 
 class PersistentOutcome(OutcomeProvider):
@@ -292,6 +290,47 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": stats,
             }
             self._json(resp)
+        elif self.path == "/save":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._json({"error": "invalid json"}, 400)
+                return
+            if not isinstance(body, dict):
+                self._json({"error": "invalid body"}, 400)
+                return
+            msg = str(body.get("msg") or "").strip()
+            intent = str(body.get("intent") or detect_coarse_intent(msg) or "general")
+            try:
+                prob = float(body.get("prob", 0.5))
+            except (TypeError, ValueError):
+                prob = 0.5
+            before = store.count()
+            exp = Experience(
+                experience_id=f"save-{int(time.time() * 1000)}",
+                timestamp=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+                source_event_id="http-save",
+                raw_input=msg,
+                intent=intent,
+                action_type="respond",
+                predicted_outcome=f"{intent}完成",
+                predicted_prob=prob,
+                actual_outcome="saved",
+                success=True,
+                evaluation="explicit_save",
+                context_tags=[f"intent:{intent}", "source:http-save"],
+            )
+            store.save(exp)
+            self._json({
+                "ok": True,
+                "saved": True,
+                "intent": intent,
+                "prob": prob,
+                "before": before,
+                "experience_count": store.count(),
+            })
         else:
             self._json({"error": "not found"}, 404)
 
@@ -308,6 +347,7 @@ if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"NeuroCortex running on http://localhost:{PORT}")
     print(f"  POST /chat   - 发送消息")
+    print(f"  POST /save   - 显式保存经验")
     print(f"  GET  /stats  - 查看统计")
     print(f"  GET  /health - 健康检查")
     try:
