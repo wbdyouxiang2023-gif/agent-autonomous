@@ -306,23 +306,25 @@ class IntentExtractor:
                 has_pattern = False
                 for key in ("command", "cmd", "path", "pattern", "query", "input"):
                     v = obj.get(key)
-                    if v and isinstance(v, str):
+                    if v and isinstance(v, str) and v.strip():
                         # Strip home-dir prefixes to avoid path 'user' false match
                         cleaned = re.sub(r"^/home/[^/]+/", "", v)
                         parts.append(cleaned)
                         if key in ("pattern", "query"):
                             has_pattern = True
-                if parts:
-                    text = " ".join(parts)
-                    # pattern/query fields imply a search task
-                    if has_pattern:
-                        text += " search"
-                    # target: content/files implies searching code/files
-                    tgt = obj.get("target")
-                    if tgt == "content":
-                        text += " code"
-                    if obj.get("output_mode") == "files_only":
-                        text += " file"
+                if not parts:
+                    # Empty JSON payload (all fields empty) → no signal
+                    return ""
+                text = " ".join(parts)
+                # pattern/query fields imply a search task
+                if has_pattern:
+                    text += " search"
+                # target: content/files implies searching code/files
+                tgt = obj.get("target")
+                if tgt == "content":
+                    text += " code"
+                if obj.get("output_mode") == "files_only":
+                    text += " file"
         except (ValueError, TypeError):
             pass  # not JSON, use as-is
 
