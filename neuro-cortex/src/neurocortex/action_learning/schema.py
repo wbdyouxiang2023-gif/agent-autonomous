@@ -55,11 +55,33 @@ class ActionLearningCandidate:
 
 @dataclass(frozen=True)
 class ActionLearningOutcome:
-    """REAL outcome observation. Only success=True/False is usable."""
+    """REAL outcome observation with optional task completion tracking.
+    
+    Design rules (Level 4.0):
+    - success: execution_success (did the action execute without error?)
+    - task_completion: did the task actually complete? (None = unknown)
+    - MUST NOT fabricate task_completion from action_type heuristics
+    """
 
     success: bool
+    task_completion: bool | None = None  # NEW: task completion status
     actual_outcome: str = ""
     observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @property
+    def is_complete(self) -> bool:
+        """Task completion is known and True."""
+        return self.task_completion is True
+
+    @property
+    def is_incomplete(self) -> bool:
+        """Task completion is known and False."""
+        return self.task_completion is False
+
+    @property
+    def task_completion_unknown(self) -> bool:
+        """Task completion is not known."""
+        return self.task_completion is None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -87,7 +109,13 @@ def candidate_from_action_type(action_type: str) -> ActionLearningCandidate:
 
 
 def outcome_from_event(event: "CortexEvent") -> ActionLearningOutcome | None:
-    """Derive a REAL outcome from a completed event (None when unknown)."""
+    """Derive a REAL outcome from a completed event (None when unknown).
+    
+    Task completion is extracted from event.outcome.task_completed if available.
+    If not present, task_completion is set to None (unknown).
+    
+    NEVER fabricates task_completion from action_type.
+    """
     outcome = getattr(event, "outcome", None)
     if outcome is None:
         return None
@@ -95,7 +123,17 @@ def outcome_from_event(event: "CortexEvent") -> ActionLearningOutcome | None:
     if success is None:
         return None
     actual_outcome = getattr(outcome, "actual_outcome", "")
-    return ActionLearningOutcome(success=bool(success), actual_outcome=actual_outcome or "")
+    
+    # Extract task_completion if available (NEW in Level 4.0)
+    # Do NOT use action_type heuristics
+    task_completed = getattr(outcome, "task_completed", None)
+    task_completion = bool(task_completed) if task_completed is not None else None
+    
+    return ActionLearningOutcome(
+        success=bool(success),
+        task_completion=task_completion,
+        actual_outcome=actual_outcome or "",
+    )
 
 
 def candidate_from_legacy_experience(exp: "Experience") -> ActionLearningCandidate | None:

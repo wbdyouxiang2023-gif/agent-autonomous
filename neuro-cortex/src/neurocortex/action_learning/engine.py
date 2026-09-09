@@ -117,6 +117,8 @@ class StatisticsStore:
         return {
             "success_count": sum(int(e.get("success_count", 0)) for e in entries),
             "failure_count": sum(int(e.get("failure_count", 0)) for e in entries),
+            "task_completion_count": sum(int(e.get("task_completion_count", 0)) for e in entries),
+            "task_incompletion_count": sum(int(e.get("task_incompletion_count", 0)) for e in entries),
             "total_count": sum(int(e.get("total_count", 0)) for e in entries),
             "last_seen": max((e.get("last_seen", "") for e in entries), default=""),
             "updated_at": max((e.get("updated_at", "") for e in entries), default=""),
@@ -125,13 +127,21 @@ class StatisticsStore:
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return {k: dict(v) for k, v in self._data.items()}
 
-    def record(self, sit_key: str, action_key: str, success: bool, observed_at: str) -> None:
+    def record(self, sit_key: str, action_key: str, success: bool, observed_at: str,
+               task_completion: bool | None = None) -> None:
+        """Record execution outcome with optional task completion.
+        
+        Args:
+            task_completion: True/False for task completion, None if unknown
+        """
         key = stat_key(sit_key, action_key)
         entry = self._data.get(key)
         if entry is None:
             entry = {
                 "success_count": 0,
                 "failure_count": 0,
+                "task_completion_count": 0,  # NEW
+                "task_incompletion_count": 0,  # NEW
                 "total_count": 0,
                 "last_seen": "",
                 "updated_at": "",
@@ -141,6 +151,11 @@ class StatisticsStore:
             entry["success_count"] = int(entry.get("success_count", 0)) + 1
         else:
             entry["failure_count"] = int(entry.get("failure_count", 0)) + 1
+        # Record task completion if provided (NEW)
+        if task_completion is True:
+            entry["task_completion_count"] = int(entry.get("task_completion_count", 0)) + 1
+        elif task_completion is False:
+            entry["task_incompletion_count"] = int(entry.get("task_incompletion_count", 0)) + 1
         entry["total_count"] = int(entry.get("total_count", 0)) + 1
         entry["last_seen"] = observed_at
         entry["updated_at"] = observed_at
@@ -331,6 +346,7 @@ class ActionLearningEngine:
         """Record a REAL outcome into situation-aware statistics.
 
         Only success=True / success=False update. UNKNOWN (None) is ignored.
+        Task completion is recorded if available (NEW Level 4.0).
         """
         if not self._config.enabled:
             return False
@@ -340,7 +356,10 @@ class ActionLearningEngine:
         if not cand.action_key:
             return False
         sit_key = situation_key(situation)
-        self._store.record(sit_key, cand.action_key, bool(outcome.success), outcome.observed_at)
+        self._store.record(
+            sit_key, cand.action_key, bool(outcome.success), outcome.observed_at,
+            task_completion=outcome.task_completion,  # NEW
+        )
         self._store.save()
         return True
 
@@ -421,12 +440,16 @@ class ActionLearningEngine:
             "support_count": 0,
             "success_count": 0,
             "failure_count": 0,
+            "task_completion_count": 0,  # NEW
+            "task_incompletion_count": 0,  # NEW
             "match_level": None,
         }
 
     def _history_evidence(self, stats: dict[str, Any]) -> dict[str, Any]:
         success = int(stats.get("success_count", 0))
         failure = int(stats.get("failure_count", 0))
+        task_complete = int(stats.get("task_completion_count", 0))  # NEW
+        task_incomplete = int(stats.get("task_incompletion_count", 0))  # NEW
         support = success + failure
         if support == 0:
             return self._empty_history()
@@ -437,12 +460,25 @@ class ActionLearningEngine:
         confidence = support / (support + self._config.confidence_k)
         hist_score = smoothed * confidence + self._config.prior_rate * (1.0 - confidence)
 
+        # NEW: Task completion rate (if available)
+        task_support = task_complete + task_incomplete
+        if task_support > 0:
+            task_completion_rate = (task_complete + alpha) / (task_support + alpha + beta)
+            task_confidence = task_support / (task_support + self._config.confidence_k)
+        else:
+            task_completion_rate = None  # Unknown
+            task_confidence = 0.0
+
         return {
             "history_score": round(hist_score, 4),
             "confidence": round(confidence, 4),
             "support_count": support,
             "success_count": success,
             "failure_count": failure,
+            "task_completion_count": task_complete,  # NEW
+            "task_incompletion_count": task_incomplete,  # NEW
+            "task_completion_rate": round(task_completion_rate, 4) if task_completion_rate is not None else None,  # NEW
+            "task_confidence": round(task_confidence, 4),  # NEW
             "match_level": None,
         }
 
