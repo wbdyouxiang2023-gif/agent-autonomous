@@ -525,11 +525,17 @@ class ActionLearningEngine:
 
     @staticmethod
     def _sort_ranked(evaluated: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """1. evidence first (L1 > L2 > L3 > none), 2. score, 3. support, 4. original."""
+        """Sort by adjusted_score (primary), then support_count (tie-breaker).
+        
+        FIXED: Previously prioritized -level over score, which incorrectly
+        forced L1 above L3 regardless of actual adjusted scores.
+        
+        The adjusted_score already incorporates match_level_penalty,
+        so sorting by score is sufficient.
+        """
         def key_fn(r: dict[str, Any]) -> tuple:
-            has_evidence = 1 if r["evidence_status"] == "evidence" else 0
-            level = r.get("match_level") or 4
             score = r["score"] if r["score"] is not None else -1.0
-            return (has_evidence, -level, score, r["support_count"], -r["original_index"])
-
+            support = r["support_count"]
+            return (score, support)
+        
         return sorted(evaluated, key=key_fn, reverse=True)
