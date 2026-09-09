@@ -37,13 +37,28 @@ ACTION_LEARNING_ENABLED = os.environ.get("NEUROCORTEX_ACTION_LEARNING", "false")
 ACTION_LEARNING_SHADOW = os.environ.get("ACTION_LEARNING_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
 action_bridge = ActionLearningBridge()
 
-# ── Phase R5: Shadow Learning Observer with PolicyEngine ───────────────
+# ── Phase R5/NC-05B: Shadow Learning Observer with Multi-Action Support ──
 # Observes decisions without changing behavior. Records shadow policy.
-# PolicyEngine runs in shadow mode: computes decisions but never affects production.
+# Supports multi-action candidate generation for NC-05B experiments.
 POLICY_ENABLED = os.environ.get("NEUROCORTEX_POLICY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 POLICY_SHADOW_ONLY = os.environ.get("NEUROCORTEX_POLICY_SHADOW_ONLY", "true").strip().lower() in ("1", "true", "yes", "on")
-from shadow_observer import get_shadow_observer
-shadow_observer = get_shadow_observer(policy_enabled=POLICY_ENABLED)
+NC05B_ENABLED = os.environ.get("NC05B_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+if NC05B_ENABLED:
+    from nc05b_shadow_observer import get_shadow_observer as get_nc05b_observer
+    shadow_observer = get_nc05b_observer(policy_enabled=POLICY_ENABLED)
+else:
+    from shadow_observer import get_shadow_observer
+    shadow_observer = get_shadow_observer(policy_enabled=POLICY_ENABLED)
+
+# ── NC-06: Controlled Policy Trial ──
+# Compares Original vs NeuroCortex Policy in controlled trial mode.
+# Traffic split: Original ~80%, NC-06 ~20% (configurable via NC06_NC_RATIO)
+NC06_ENABLED = os.environ.get("NC06_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+NC06_NC_RATIO = float(os.environ.get("NC06_NC_RATIO", "0.2"))
+nc06_trial = None
+if NC06_ENABLED:
+    from nc06_controlled_trial import get_controlled_trial
+    nc06_trial = get_controlled_trial()
 
 PORT = 9100
 STORE_PATH = os.path.expanduser("~/.neurocortex_memory.jsonl")
@@ -156,7 +171,7 @@ def _process_with_action_learning(raw_input):
 
 cortex.process = _process_with_action_learning
 
-print(f"Action Learning: {'ENABLED' if ACTION_LEARNING_ENABLED else 'OFF'} (shadow={ACTION_LEARNING_SHADOW}, policy={POLICY_ENABLED})")
+print(f"Action Learning: {'ENABLED' if ACTION_LEARNING_ENABLED else 'OFF'} (shadow={ACTION_LEARNING_SHADOW}, policy={POLICY_ENABLED}, nc05b={NC05B_ENABLED})")
 print(f"Loaded {store.count()} experiences. Ready on port {PORT}.")
 
 
@@ -180,7 +195,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/chat":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            msg = body.get("msg", "").strip()
+            # Handle both dict and list body formats
+            if isinstance(body, list):
+                body = {"msg": ""}
+            msg = body.get("msg", "").strip() if isinstance(body, dict) else ""
             if not msg:
                 self._json({"error": "empty message"}, 400)
                 return
@@ -196,6 +214,21 @@ class Handler(BaseHTTPRequestHandler):
                 shadow_result = shadow_observer.observe_decision(event, msg)
             except Exception as _e:
                 pass  # Never let shadow observation failures affect the response
+            
+            # NC-06: Controlled Policy Trial (if enabled)
+            nc06_result = None
+            if NC06_ENABLED and nc06_trial is not None:
+                try:
+                    nc06_result = nc06_trial.choose_action(
+                        event, msg, event.perception.intent, event.decision.selected_action
+                    )
+                    nc06_trial.log_decision(nc06_result)
+                    # Apply NC-06 selection to event (override original if safe)
+                    if nc06_result.get("final_action") and nc06_result.get("final_action") != nc06_result.get("original_action"):
+                        event.decision.selected_action = nc06_result["final_action"]
+                        event.decision.decision_reason = f"nc06_policy: {nc06_result.get('decision_status', '')}"
+                except Exception as _e:
+                    pass  # Never let NC-06 failures affect the response
             
             retrieved = retriever.retrieve(msg)
             stats = get_stats(store)
