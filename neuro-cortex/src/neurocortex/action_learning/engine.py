@@ -271,19 +271,31 @@ class ActionLearningEngine:
                 score = None
                 evidence_status = "no_evidence"
             else:
-                score = (
+                # NC-06.2 FIX 1: Apply match-level penalty to raw score
+                raw_score = (
                     self._config.history_weight * hist_score
                     + self._config.semantic_weight * semantic
                     + self._config.recency_weight * recency
                 )
-                score = max(0.0, min(1.0, score))
+                raw_score = max(0.0, min(1.0, raw_score))
+                
+                # Apply match-level penalty: L1=1.0, L2=0.9, L3=0.7, L4=0.5
+                ml_penalty = self._config.match_level_penalties.get(match_level, 1.0) if match_level is not None else 1.0
+                adjusted_score = raw_score * ml_penalty
+                
+                score = adjusted_score
                 evidence_status = "evidence"
+                hist["raw_score"] = round(raw_score, 4)
+                hist["match_penalty"] = ml_penalty
+                hist["adjusted_score"] = round(adjusted_score, 4)
 
             evaluated.append({
                 "action_key": cand.action_key,
                 "action_type": cand.action_type,
                 "strategy": cand.strategy,
                 "score": score,
+                "raw_score": hist.get("raw_score"),
+                "match_penalty": hist.get("match_penalty"),
                 "estimated_success": hist_score,
                 "support_count": support,
                 "success_count": hist["success_count"],
@@ -296,6 +308,7 @@ class ActionLearningEngine:
                 "borrowed_from": borrowed.borrowed_from if borrowed is not None else None,
                 "situation_key": sit_key,
                 "original_index": idx,
+                "evidence_scope": "local" if match_level == 1 else "global" if match_level == 3 else "unknown",
             })
 
         return self._sort_ranked(evaluated)

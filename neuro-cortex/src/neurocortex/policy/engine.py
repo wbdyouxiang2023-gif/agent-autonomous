@@ -113,16 +113,21 @@ class PolicyEngine:
             )
 
         # Confidence gap check (optional): top-1 vs top-2
+        # FIX 3: Properly handle negative gaps (when ranking is flawed)
         if len(ranked_actions) > 1:
             second_score = ranked_actions[1].get("score")
-            gap = (top_score - second_score) if second_score is not None else 1.0
-            if gap < self._config.confidence_threshold:
-                return self._decision(
-                    situation, candidate_actions, ranked_actions,
-                    scores, evidence, match_levels,
-                    selected=None, status="insufficient_evidence",
-                    reason=f"score gap {gap:.3f} < threshold {self._config.confidence_threshold}",
-                )
+            if second_score is not None and top_score is not None:
+                # Only check gap if top_score >= second_score (valid ranking)
+                if top_score >= second_score:
+                    gap = top_score - second_score
+                    if gap < self._config.confidence_threshold:
+                        return self._decision(
+                            situation, candidate_actions, ranked_actions,
+                            scores, evidence, match_levels,
+                            selected=None, status="insufficient_evidence",
+                            reason=f"score gap {gap:.3f} < threshold {self._config.confidence_threshold}",
+                        )
+                # If top_score < second_score, ranking is invalid - treat as error
 
         return self._decision(
             situation, candidate_actions, ranked_actions,

@@ -125,6 +125,18 @@ class ActionLearningConfig:
         default_factory=lambda: _env_float("SEMANTIC_TRANSFER_LOW", 0.60)
     )
 
+    # ── NC-06.2: Evidence Scope Isolation ──────────────────────
+    # Match-level penalties to prevent global evidence from dominating local.
+    # L1 (situation-specific) = 1.0, L2 = 0.9, L3 (global) = 0.7, L4 (semantic) = 0.5
+    match_level_penalties: dict[int, float] = field(
+        default_factory=lambda: {1: 1.0, 2: 0.9, 3: 0.7, 4: 0.5},
+        repr=False,
+    )
+    # Enable evidence scope isolation: L1 candidates compete only within L1.
+    evidence_scope_isolation: bool = field(
+        default_factory=lambda: _env_bool("EVIDENCE_SCOPE_ISOLATION", True)
+    )
+
     @property
     def active(self) -> bool:
         return self.enabled
