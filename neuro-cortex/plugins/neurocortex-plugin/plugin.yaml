@@ -1,5 +1,8 @@
 name: neurocortex-plugin
-version: 1.0.0
-description: "NeuroCortex v5.1 cognitive system — action learning, policy decision, semantic transfer, integrated with Hermes Agent via post_tool_call hook."
-author: "Hermes Team"
+version: 2.1.0
+description: "NeuroCortex cognitive system — self-contained Hermes plugin (action learning, policy, shadow mode)."
+author: "Agnes x monkeycode-ai"
 kind: backend
+enabled: true
+auto_start: true
+startup_script: "python3 server.py"
