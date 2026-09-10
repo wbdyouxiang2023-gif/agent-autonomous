@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """测试 stepfun_api 接口调用"""
 import json
+import os
 import urllib.request
 import urllib.error
 
-BASE_URL = "https://chatapi.stepfun.com/chatapi/v1"
-API_KEY = "***REMOVED***"
-MODEL_ID = "step-3.7-flash"
+BASE_URL = os.getenv("STEPFUN_BASE_URL", "https://chatapi.stepfun.com/chatapi/v1")
+API_KEY = os.getenv("STEPFUN_API_KEY", "")
+MODEL_ID = os.getenv("STEPFUN_MODEL_ID", "step-3.7-flash")
 
 def chat_completion(messages, stream=False):
     url = f"{BASE_URL}/chat/completions"
