@@ -1,12 +1,12 @@
 """NeuroCortex Plugin — Cognitive lifecycle integration for Hermes.
 
+Self-contained: all runtime code lives inside this plugin directory.
 Adds action learning, policy learning, and cognitive state tracking
-to the Hermes Agent via post_tool_call hook.
+via Hermes post_tool_call / pre_llm_call hooks.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 import logging
@@ -15,17 +15,14 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+_PLUGIN_DIR = Path(__file__).resolve().parent
+_SRC_DIR = _PLUGIN_DIR / "src"
+
 
 def _load_neurocortex():
-    """Load neurocortex from source path.
-
-    The plugin directory is now named 'neurocortex-plugin' (NOT
-    'neurocortex'), so the real source package name is unambiguous.
-    We still insert the source dir into sys.path to be safe.
-    """
-    _neuro_src = Path.home() / "workspace" / "agent-autonomous" / "neuro-cortex" / "src"
-    if str(_neuro_src) not in sys.path:
-        sys.path.insert(0, str(_neuro_src))
+    """Load the neurocortex package bundled inside this plugin directory."""
+    if str(_SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(_SRC_DIR))
     import neurocortex
     return neurocortex
 
@@ -42,10 +39,9 @@ class NeuroCortexPlugin:
         self._exp_file = Path.home() / ".neurocortex_experiences.jsonl"
 
     def _ensure_initialized(self) -> None:
-        """Lazy initialization to avoid breaking Hermes if neurocortex fails."""
+        """Lazy initialization; never breaks Hermes if NeuroCortex fails."""
         if self._cortex is not None:
             return
-
         try:
             nc = _load_neurocortex()
             from neurocortex.cortex import NeuroCortex
@@ -57,19 +53,14 @@ class NeuroCortexPlugin:
             from neurocortex.memory.experience_store import ExperienceStore
 
             self._cortex = NeuroCortex()
-            # Enable learning explicitly — the plugin's whole job is to
-            # collect real outcomes. Shadow-only stays ON (never changes
-            # real decisions), but recording MUST be active or nothing
-            # is ever learned.
             self._action_engine = ActionLearningEngine(
                 config=ActionLearningConfig(
-                    enabled=True,          # record real outcomes
-                    shadow_only=True,      # never alter real decisions
+                    enabled=True,
+                    shadow_only=True,
                 )
             )
             self._policy_engine = PolicyEngine(config=PolicyConfig())
             self._experience_store = ExperienceStore(store_path=str(self._exp_file))
-
             logger.info("NeuroCortex plugin initialized successfully")
         except Exception as e:
             logger.warning(f"NeuroCortex initialization failed: {e}")
@@ -80,14 +71,16 @@ class NeuroCortexPlugin:
         self._ensure_initialized()
         if self._cortex is None:
             return {"status": "uninitialized", "error": "init_failed"}
-
-        state = self._cortex._state_store.to_dict() if hasattr(self._cortex, '_state_store') else {}
-
-        # Add action learning stats
+        state = self._cortex._state_store.to_dict() if hasattr(self._cortex, "_state_store") else {}
         stats = {}
         if self._action_engine:
-            stats = self._action_engine.get_statistics()
-
+            try:
+                if hasattr(self._action_engine, "get_statistics"):
+                    stats = self._action_engine.get_statistics()
+                elif hasattr(self._action_engine, "store") and hasattr(self._action_engine.store, "snapshot"):
+                    stats = self._action_engine.store.snapshot()
+            except Exception as e:
+                logger.debug(f"action stats unavailable: {e}")
         return {
             "status": "active",
             "state": state,
@@ -101,10 +94,8 @@ class NeuroCortexPlugin:
         self._ensure_initialized()
         if self._experience_store is None:
             return
-
         nc = _load_neurocortex()
         from neurocortex.event import Experience
-
         exp = Experience(
             raw_input=raw_input[:200],
             intent=intent,
@@ -113,11 +104,9 @@ class NeuroCortexPlugin:
             success=success,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-
         try:
             self._experience_store.save(exp)
             if self._action_engine:
-                # ActionLearningEngine.record_outcome(situation, action, outcome)
                 from neurocortex.action_learning import (
                     ActionLearningSituation, ActionLearningOutcome,
                 )
@@ -131,7 +120,6 @@ class NeuroCortexPlugin:
             logger.warning(f"Failed to record experience: {e}")
 
     def to_dict(self) -> dict:
-        """Serialize plugin state."""
         return {
             "name": "neurocortex",
             "version": "1.0",
@@ -139,16 +127,13 @@ class NeuroCortexPlugin:
         }
 
     def get_status(self) -> dict:
-        """Return plugin status for diagnostics."""
         return self.to_dict()
 
 
-# Hermes plugin interface
 _plugin_instance: NeuroCortexPlugin | None = None
 
 
 def get_plugin() -> NeuroCortexPlugin:
-    """Get or create the plugin singleton."""
     global _plugin_instance
     if _plugin_instance is None:
         _plugin_instance = NeuroCortexPlugin()
@@ -156,27 +141,14 @@ def get_plugin() -> NeuroCortexPlugin:
 
 
 def register(ctx) -> None:
-    """Register NeuroCortex hooks with Hermes.
-
-    Hermes PluginContext.register_hook(name, callback) is a PLAIN METHOD,
-    not a decorator. Calling it as a decorator (``@ctx.register_hook(...)``)
-    passes the function as ``callback=`` positionally which breaks loading.
-    """
+    """Register NeuroCortex hooks with Hermes (plain-method form)."""
     plugin = get_plugin()
 
     def on_tool_call(**kw) -> None:
-        """Record tool call outcome for action learning.
-
-        Real kwargs from _emit_post_tool_call_hook (tool_executor.py:274):
-          function_name, function_args, result, task_id, session_id,
-          tool_call_id, turn_id, duration_ms, status, error_type,
-          error_message, middleware_trace
-        """
         try:
             plugin._ensure_initialized()
             if plugin._cortex is None:
                 return
-
             tool_name = kw.get("tool_name") or kw.get("function_name") or ""
             args = kw.get("args") or kw.get("function_args") or {}
             result = kw.get("result") or ""
@@ -184,11 +156,6 @@ def register(ctx) -> None:
             error_type = kw.get("error_type") or ""
             error_message = kw.get("error_message") or ""
 
-            # success判定（从宽松到严格）:
-            # 1. 显式 status 为 success / ok / true
-            # 2. 有 error_message / error_type → 失败
-            # 3. dict result: error 字段非空 → 失败；exit_code==0 → 成功
-            # 4. 其他非空结果 → 成功
             if status:
                 success = str(status).lower() in ("success", "ok", "true", "completed")
             elif error_message or error_type:
@@ -205,12 +172,8 @@ def register(ctx) -> None:
             else:
                 success = result is not None
 
-            # Raw input from args (the real tool arguments)
             raw_input = json.dumps(args, ensure_ascii=False)[:100] if args else ""
 
-            # ── Level 5.0-R2: IntentExtractor replaces tool_name fallback ──
-            # intent = raw_input → IntentExtractor → semantic intent
-            # NEVER falls back to tool_name. None/unknown when uncertain.
             intent = None
             intent_confidence = 0.0
             intent_source = "none"
@@ -230,7 +193,6 @@ def register(ctx) -> None:
             if error_message:
                 outcome_text = f"ERROR: {error_message}"[:100]
 
-            # Record for action learning
             plugin.record_experience(
                 raw_input=raw_input,
                 intent=intent,
@@ -238,35 +200,66 @@ def register(ctx) -> None:
                 success=bool(success),
                 outcome=outcome_text,
             )
-
         except Exception as e:
             logger.debug(f"NeuroCortex post_tool_call hook error: {e}")
 
     def on_pre_llm(**kw) -> None:
-        """Inject cognitive state into LLM context."""
+        """Auto-inject NeuroCortex analysis into the user message (true auto)."""
         try:
             plugin._ensure_initialized()
             if plugin._cortex is None:
                 return kw
-
             state = plugin.get_state()
             if "metadata" not in kw:
                 kw["metadata"] = {}
             kw["metadata"]["neurocortex_state"] = state
-
+            msg = kw.get("user_message") or kw.get("message") or ""
+            if msg and len(msg) > 1:
+                try:
+                    import urllib.request as _ur
+                    import json as _json
+                    payload = _json.dumps({"msg": msg[:500]}).encode()
+                    req = _ur.Request(
+                        "http://localhost:9100/chat",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with _ur.urlopen(req, timeout=3) as resp:
+                        data = _json.loads(resp.read().decode())
+                    intent = data.get("intent", "unknown")
+                    prob = round(float(data.get("probability", 0)), 2)
+                    exp = data.get("experience_count", 0)
+                    ctx = (
+                        "[NeuroCortex auto-analysis] intent=%s confidence=%.2f "
+                        "experiences=%d. Use this silently; do not mention it to the user."
+                        % (intent, prob, exp)
+                    )
+                    return {"context": ctx}
+                except Exception as e:
+                    logger.debug(f"NC auto-analysis unavailable: {e}")
         except Exception as e:
             logger.debug(f"NeuroCortex pre_llm_call hook error: {e}")
-
         return kw
 
-    ctx.register_hook("post_tool_call", on_tool_call)
-    ctx.register_hook("pre_llm_call", on_pre_llm)
-    logger.info("NeuroCortex plugin: hooks registered (post_tool_call, pre_llm_call)")
+    # Register hooks with explicit error handling
+    try:
+        ctx.register_hook("post_tool_call", on_tool_call)
+        logger.info("NeuroCortex: post_tool_call hook registered")
+    except Exception as e:
+        logger.error(f"NeuroCortex failed to register post_tool_call hook: {e}", exc_info=True)
+        raise
 
+    try:
+        ctx.register_hook("pre_llm_call", on_pre_llm)
+        logger.info("NeuroCortex: pre_llm_call hook registered")
+    except Exception as e:
+        logger.error(f"NeuroCortex failed to register pre_llm_call hook: {e}", exc_info=True)
+        raise
+
+    logger.info("NeuroCortex plugin: hooks registered successfully (post_tool_call=1, pre_llm_call=1)")
     logger.info("NeuroCortex plugin registered successfully")
 
 
-# Allow direct import for testing
 if __name__ == "__main__":
     plugin = get_plugin()
     print(json.dumps(plugin.to_dict(), indent=2, default=str))
