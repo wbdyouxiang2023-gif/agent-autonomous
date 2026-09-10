@@ -31,6 +31,13 @@ Entries discovered by the Agent during task execution should follow this format:
 
 ## Entries
 
+[User Instruction Summary]
+- Date: 2026-09-10
+- Context: 安全审查讨论中，模型说"旧仓库公开期间这些值已被外部抓取过"
+- Instructions:
+  - 说话要严谨：区分"理论上可能"与"已观测到/确定事实"，不推测未验证的内容
+  - 不确定时明确说"不确定"或"无法确认"
+
 [Project Knowledge Summary]
 - Date: 2026-09-06
 - Context: 搭建 Agent 工作台，初始化 autonomous agent 系统

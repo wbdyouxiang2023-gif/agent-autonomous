@@ -13,3 +13,4 @@ __pycache__/
 ~/.agent_memory.json
 ~/.decision_log.json
 ~/.creator_store.json
+experiment/experiment_summary.json
