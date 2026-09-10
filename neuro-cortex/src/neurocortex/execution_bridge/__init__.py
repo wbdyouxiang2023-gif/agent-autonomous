@@ -10,6 +10,8 @@ from .schema import ActionRequest, ExecutionResult, ExecutionEvidence, request_f
 from .adapter import HermesExecutionAdapter
 from .outcome import ExecutionLog, RealExecutionOutcomeProvider
 from .bridge import ExecutionBridge
+from .sandbox import SandboxExecutor, request_for_action, ALLOWED_ACTIONS
+from .verifier import TaskVerifier, VerifyResult
 
 __all__ = [
     "ExecutionBridgeConfig",
@@ -21,4 +23,9 @@ __all__ = [
     "ExecutionLog",
     "RealExecutionOutcomeProvider",
     "ExecutionBridge",
+    "SandboxExecutor",
+    "request_for_action",
+    "ALLOWED_ACTIONS",
+    "TaskVerifier",
+    "VerifyResult",
 ]

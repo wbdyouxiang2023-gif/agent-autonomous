@@ -2,7 +2,7 @@
   {
     "group_id": "A",
     "phase": "phase1",
-    "trial_id": "NC09-A-P1-1bc1",
+    "trial_id": "NC09-A-P1-575d",
     "situation": "定位函数 foo 在源码中的位置",
     "task_type": "code_locator",
     "family": "CODE_LOCATION",
@@ -19,12 +19,12 @@
     "outcome": "success",
     "experience_id": null,
     "causality_note": "cold start",
-    "timestamp": "2026-09-09T14:16:04.712723+00:00"
+    "timestamp": "2026-09-09T22:19:05.638357+00:00"
   },
   {
     "group_id": "A",
     "phase": "phase2",
-    "trial_id": "NC09-A-P1-1bc1",
+    "trial_id": "NC09-A-P1-575d",
     "situation": "定位函数 foo 在源码中的位置",
     "task_type": "code_locator",
     "family": "CODE_LOCATION",
@@ -39,14 +39,14 @@
     "execution_success": true,
     "task_completed": true,
     "outcome": "success",
-    "experience_id": "exp-NC09-A-P1-1bc1-1788963364",
+    "experience_id": "exp-NC09-A-P1-575d-1788992345",
     "causality_note": "learned=True, key=family:CODE_LOCATION",
-    "timestamp": "2026-09-09T14:16:04.714317+00:00"
+    "timestamp": "2026-09-09T22:19:05.640661+00:00"
   },
   {
     "group_id": "A",
     "phase": "phase3",
-    "trial_id": "NC09-A-P3-4ede",
+    "trial_id": "NC09-A-P3-f110",
     "situation": "查找符号 bar 在代码里的位置",
     "task_type": "code_locator",
     "family": "CODE_LOCATION",
@@ -62,12 +62,12 @@
     "outcome": "failure",
     "experience_id": null,
     "causality_note": "adaptation: p1=search_files→p3=search_files",
-    "timestamp": "2026-09-09T14:16:04.714648+00:00"
+    "timestamp": "2026-09-09T22:19:05.641120+00:00"
   },
   {
     "group_id": "B",
     "phase": "phase1",
-    "trial_id": "NC09-B-P1-57f5",
+    "trial_id": "NC09-B-P1-8543",
     "situation": "读取不存在的文件 missing_config.json 的内容",
     "task_type": "file_read",
     "family": "FILE_READ",
@@ -84,12 +84,12 @@
     "outcome": "failure",
     "experience_id": null,
     "causality_note": "cold start",
-    "timestamp": "2026-09-09T14:16:04.717091+00:00"
+    "timestamp": "2026-09-09T22:19:05.646540+00:00"
   },
   {
     "group_id": "B",
     "phase": "phase2",
-    "trial_id": "NC09-B-P1-57f5",
+    "trial_id": "NC09-B-P1-8543",
     "situation": "读取不存在的文件 missing_config.json 的内容",
     "task_type": "file_read",
     "family": "FILE_READ",
@@ -104,14 +104,14 @@
     "execution_success": false,
     "task_completed": false,
     "outcome": "failure",
-    "experience_id": "exp-NC09-B-P1-57f5-1788963364",
+    "experience_id": "exp-NC09-B-P1-8543-1788992345",
     "causality_note": "learned=True, key=family:FILE_READ",
-    "timestamp": "2026-09-09T14:16:04.717645+00:00"
+    "timestamp": "2026-09-09T22:19:05.647366+00:00"
   },
   {
     "group_id": "B",
     "phase": "phase3",
-    "trial_id": "NC09-B-P3-7d4d",
+    "trial_id": "NC09-B-P3-3f0f",
     "situation": "打开并查看 settings_b.json 文件内容",
     "task_type": "file_read",
     "family": "FILE_READ",
@@ -127,12 +127,12 @@
     "outcome": "failure",
     "experience_id": null,
     "causality_note": "adaptation: p1=terminal→p3=read_file",
-    "timestamp": "2026-09-09T14:16:04.718044+00:00"
+    "timestamp": "2026-09-09T22:19:05.647821+00:00"
   },
   {
     "group_id": "C",
     "phase": "phase1",
-    "trial_id": "NC09-C-P1-ebee",
+    "trial_id": "NC09-C-P1-61be",
     "situation": "分析项目目录结构和模块组织方式",
     "task_type": "code_inspect",
     "family": "CODE_INSPECTION",
@@ -149,12 +149,12 @@
     "outcome": "success",
     "experience_id": null,
     "causality_note": "cold start",
-    "timestamp": "2026-09-09T14:16:04.718464+00:00"
+    "timestamp": "2026-09-09T22:19:05.648317+00:00"
   },
   {
     "group_id": "C",
     "phase": "phase2",
-    "trial_id": "NC09-C-P1-ebee",
+    "trial_id": "NC09-C-P1-61be",
     "situation": "分析项目目录结构和模块组织方式",
     "task_type": "code_inspect",
     "family": "CODE_INSPECTION",
@@ -169,14 +169,14 @@
     "execution_success": true,
     "task_completed": true,
     "outcome": "success",
-    "experience_id": "exp-NC09-C-P1-ebee-1788963364",
+    "experience_id": "exp-NC09-C-P1-61be-1788992345",
     "causality_note": "learned=True, key=family:CODE_INSPECTION",
-    "timestamp": "2026-09-09T14:16:04.719006+00:00"
+    "timestamp": "2026-09-09T22:19:05.649042+00:00"
   },
   {
     "group_id": "C",
     "phase": "phase3",
-    "trial_id": "NC09-C-P3-555f",
+    "trial_id": "NC09-C-P3-3055",
     "situation": "查看代码架构和项目依赖关系",
     "task_type": "code_inspect",
     "family": "CODE_INSPECTION",
@@ -192,6 +192,6 @@
     "outcome": "failure",
     "experience_id": null,
     "causality_note": "adaptation: p1=search_files→p3=search_files",
-    "timestamp": "2026-09-09T14:16:04.719193+00:00"
+    "timestamp": "2026-09-09T22:19:05.649334+00:00"
   }
 ]

@@ -16,6 +16,7 @@ from neurocortex.memory.experience_retriever import ExperienceRetriever
 from neurocortex.prediction.experience_prediction import ExperiencePredictionModule
 from neurocortex.interfaces import OutcomeProvider
 from neurocortex.event import OutcomeData
+from neurocortex.perception.intent_router import detect_coarse_intent
 
 STORE_PATH = os.environ.get("NEUROSTORE", os.path.expanduser("~/.neurocortex_memory.jsonl"))
 
@@ -23,22 +24,7 @@ STORE_PATH = os.environ.get("NEUROSTORE", os.path.expanduser("~/.neurocortex_mem
 
 class BilingualPerception(MockPerception):
     def _detect_intent(self, text):
-        t = text.lower()
-        if any(k in t for k in ("what", "how", "explain", "介绍", "解释", "说明", "是什么", "为什么", "了解", "知道")):
-            return "explain"
-        if any(k in t for k in ("do", "make", "build", "create", "write", "帮我", "做", "写", "建", "创建", "生成", "实现", "开发")):
-            return "create"
-        if any(k in t for k in ("fix", "debug", "bug", "错误", "问题", "故障", "修", "调", "解决", "修复")):
-            return "fix"
-        if any(k in t for k in ("analyze", "check", "review", "look", "看", "检查", "分析", "审查", "看看")):
-            return "review"
-        if any(k in t for k in ("deploy", "run", "start", "部署", "运行", "启动", "上线", "发布")):
-            return "deploy"
-        if any(k in t for k in ("optimize", "improve", "fast", "快", "优化", "加速", "性能", "提升")):
-            return "optimize"
-        if any(k in t for k in ("test", "测试", "用例", "验证")):
-            return "test"
-        return "general"
+        return detect_coarse_intent(text)
 
 
 class PersistentOutcome(OutcomeProvider):

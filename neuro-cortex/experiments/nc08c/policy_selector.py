@@ -205,21 +205,32 @@ class NCRecommender:
         top = rec.get("nc_recommended_action")
         if top is None:
             raise NCRecommenderFailure("abstain-no-recommendation", "no top action")
-        # evidence strength = valid completion evidence for top action
-        ev = scores.get(top)
         # confidence: derived from completion rate (0..1) if available
-        confidence = float(ev) if isinstance(ev, (int, float)) and ev is not None else None
-        # evidence count: from adapter evidence (support) — recompute from ranking
-        support = 0
-        for r in (rec.get("nc_ranking") or []):
-            pass
-        # support counts come from adapter internal — approximate via scores
+        ev_rate = scores.get(top)
+        confidence = float(ev_rate) if isinstance(ev_rate, (int, float)) and ev_rate is not None else None
+        # evidence strength: from adapter's sit_map-aware lookup with multi-key aggregation
         evidence_strength = 0
         if confidence is not None:
-            # map: confidence value alone insufficient; use adapter evidence lookup
             try:
-                from experiments.nc08b.shadow.shadow_adapter import _load_evidence, _completion_rate
-                evd = _load_evidence().get((situation, top))
+                from experiments.nc08b.shadow.shadow_adapter import (
+                    _load_evidence, _classify_to_task_type, _get_all_related_tts
+                )
+                agg, sit_map = _load_evidence()
+                evd = agg.get((situation, top))
+                if evd is None and sit_map:
+                    tt_key = sit_map.get(situation)
+                    if tt_key:
+                        evd = agg.get((tt_key[0], top))
+                # Multi-key aggregation for related task types
+                if evd is None:
+                    related_tts = _get_all_related_tts(situation, _classify_to_task_type)
+                    best_ev = None
+                    for rtt in related_tts:
+                        candidate_ev = agg.get((rtt, top))
+                        if candidate_ev and (candidate_ev["t"] + candidate_ev["f"]) > 0:
+                            if best_ev is None or (candidate_ev["t"] + candidate_ev["f"]) > (best_ev["t"] + best_ev["f"]):
+                                best_ev = candidate_ev
+                    evd = best_ev
                 if evd:
                     evidence_strength = int(evd.get("t", 0)) + int(evd.get("f", 0))
             except Exception:

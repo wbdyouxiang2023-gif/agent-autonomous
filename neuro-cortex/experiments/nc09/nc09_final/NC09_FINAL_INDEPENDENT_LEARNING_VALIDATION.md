@@ -1,6 +1,6 @@
 # NC-09 FINAL — Independent Learning Validation
 
-**Date:** 2026-09-09 14:16:04 UTC
+**Date:** 2026-09-09 22:19:05 UTC
 **Status:** COMPLETE
 **Verdict:** LEARNING_ADAPTATION_REPRODUCIBLY_DEMONSTRATED
 
@@ -31,7 +31,7 @@ Three independent groups with isolated statistics files:
 - Task completed: True
 
 **PHASE 2 — Learning:**
-- Experience ID: exp-NC09-A-P1-1bc1-1788963364
+- Experience ID: exp-NC09-A-P1-575d-1788992345
 - Key: learned=True, key=family:CODE_LOCATION
 - Ranking changed: True
 
@@ -61,7 +61,7 @@ Three independent groups with isolated statistics files:
 - Task completed: False
 
 **PHASE 2 — Learning:**
-- Experience ID: exp-NC09-B-P1-57f5-1788963364
+- Experience ID: exp-NC09-B-P1-8543-1788992345
 - Key: learned=True, key=family:FILE_READ
 - Ranking changed: True
 
@@ -91,7 +91,7 @@ Three independent groups with isolated statistics files:
 - Task completed: True
 
 **PHASE 2 — Learning:**
-- Experience ID: exp-NC09-C-P1-ebee-1788963364
+- Experience ID: exp-NC09-C-P1-61be-1788992345
 - Key: learned=True, key=family:CODE_INSPECTION
 - Ranking changed: True
 
@@ -122,9 +122,9 @@ Three independent groups with isolated statistics files:
 
 | Group | Status | Experience ID | Ranking Changed | Action Changed | Key |
 |-------|--------|---------------|-----------------|----------------|-----|
-| A | PARTIALLY_VALIDATED | exp-NC09-A-P1-1b | YES | NO | learned=True, key=family:CODE_LOCATION |
-| B | VALIDATED | exp-NC09-B-P1-57 | YES | YES | learned=True, key=family:FILE_READ |
-| C | PARTIALLY_VALIDATED | exp-NC09-C-P1-eb | YES | NO | learned=True, key=family:CODE_INSPECTION |
+| A | PARTIALLY_VALIDATED | exp-NC09-A-P1-57 | YES | NO | learned=True, key=family:CODE_LOCATION |
+| B | VALIDATED | exp-NC09-B-P1-85 | YES | YES | learned=True, key=family:FILE_READ |
+| C | PARTIALLY_VALIDATED | exp-NC09-C-P1-61 | YES | NO | learned=True, key=family:CODE_INSPECTION |
 
 ## 5. Negative Transfer Check
 
